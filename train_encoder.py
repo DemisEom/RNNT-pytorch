@@ -105,9 +105,4 @@ for step in range(total_step):
             logger.histo_summary(tag, value.data.cpu().numpy(), step + 1)
             logger.histo_summary(tag + '/grad', value.grad.data.cpu().numpy(), step + 1)
 
-        # 3. Log training images (image summary)
-        info = {'images': images.view(-1, 28, 28)[:10].cpu().numpy()}
-
-        for tag, images in info.items():
-            logger.image_summary(tag, images, step + 1)
 
