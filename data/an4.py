@@ -4,8 +4,7 @@ import io
 import shutil
 import tarfile
 import wget
-
-from utils import create_manifest
+from data.utils import create_manifest
 
 parser = argparse.ArgumentParser(description='Processes and downloads an4.')
 parser.add_argument('--target-dir', default='an4_dataset/', help='Path to save dataset')

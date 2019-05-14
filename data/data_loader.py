@@ -2,8 +2,8 @@ import os
 import subprocess
 from tempfile import NamedTemporaryFile
 
-from torch.distributed import get_rank
-from torch.distributed import get_world_size
+from torch.distributed.deprecated import get_rank
+from torch.distributed.deprecated import get_world_size
 from torch.utils.data.sampler import Sampler
 
 import librosa
@@ -11,6 +11,7 @@ import random
 import numpy as np
 import scipy.signal
 import torch
+import torch.functional as F
 import torchaudio
 import math
 from torch.utils.data import DataLoader
@@ -81,7 +82,7 @@ def time_mask(spec, T=15, num_masks=1, replace_with_zero=True):
 
 
 def load_audio(path):
-    sound, _ = torchaudio.load(path, normalization=True)
+    sound, _ = torchaudio.load(path)
     sound = sound.numpy().T
     if len(sound.shape) > 1:
         if sound.shape[1] == 1:
@@ -249,17 +250,21 @@ def _collate_fn(batch):
     input_percentages = torch.FloatTensor(minibatch_size)
     target_sizes = torch.IntTensor(minibatch_size)
     targets = []
+    targets_one_hot = []
     for x in range(minibatch_size):
         sample = batch[x]
         tensor = sample[0]
         target = sample[1]
+        target_one_hot = torch.nn.functional.one_hot(torch.LongTensor(target), num_classes=29)
         seq_length = tensor.size(1)
         inputs[x][0].narrow(1, 0, seq_length).copy_(tensor)
         input_percentages[x] = seq_length / float(max_seqlength)
         target_sizes[x] = len(target)
         targets.extend(target)
+        targets_one_hot.extend(target_one_hot.tolist())
     targets = torch.IntTensor(targets)
-    return inputs, targets, input_percentages, target_sizes
+    targets_one_hot = torch.LongTensor(targets_one_hot)
+    return inputs, targets, input_percentages, target_sizes, targets_one_hot
 
 
 class AudioDataLoader(DataLoader):
