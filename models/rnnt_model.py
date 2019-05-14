@@ -120,7 +120,6 @@ class JointNetwork(nn.Module):
 
         return output
 
-        return output
     def initHidden(self):
         return torch.zeros(1, 1, self.hidden_size)
 
