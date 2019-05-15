@@ -59,11 +59,12 @@ class BiRNN(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, hidden_size=4, num_layers_pBLSTM=2, num_layers=4, num_classes=10, audio_conf=None):
+    def __init__(self, hidden_size=4, num_layers_pBLSTM=4, num_layers=4, num_classes=10, audio_conf=None):
         super(Encoder, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.num_layers_pBLSTM = num_layers_pBLSTM
+        self.num_hidden_pBLSTM = 2 ** num_layers_pBLSTM
         self.conv_1 = nn.Conv2d(1, 1, (6, 6), stride=1)
         self.conv_2 = nn.Conv2d(1, 1, (6, 6), stride=1)
         self.audio_conf = audio_conf
@@ -72,29 +73,64 @@ class Encoder(nn.Module):
                              batch_first=True, bidirectional=True)
         self.pBLSTM = nn.LSTM(8, hidden_size=self.hidden_size, num_layers=1,
                               batch_first=True, bidirectional=True)
+        self.BLSTM2 = nn.LSTM(8, hidden_size=self.hidden_size, num_layers=self.num_layers,
+                             batch_first=True, bidirectional=True)
+
         self.fc = nn.Linear(hidden_size * 2, num_classes)
 
     def forward(self, x):
         x = self.conv_1(x)
         x = self.conv_2(x)
 
+        x = x.view(x.size(0), x.size(2), x.size(3))
+
         h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
         c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
-        x = x.view(x.size(0), x.size(2), x.size(3))
 
         x, h_c_0 = self.BLSTM(x, (h0, c0))
 
-        h1 = torch.zeros(1 * 2, x.size(0), self.hidden_size)
-        c1 = torch.zeros(1 * 2, x.size(0), self.hidden_size)
+        num_hiddne_state = self.num_hidden_pBLSTM
 
-        for i in range(self.num_layers_pBLSTM):
-            output, (hn, cn) = self.pBLSTM(x, (h1, c1))
-            x2 = torch.cat((hn, cn))
-            h1 = hn
-            c1 = cn
+        for i in range(self.num_layers_pBLSTM-1):
+            num_hiddne_state = int(num_hiddne_state / (i + 1))
 
-        output = self.BLSTM(x, num_layers=2)
+            hn = torch.zeros(1 * 2, x.size(0), num_hiddne_state)
+            cn = torch.zeros(1 * 2, x.size(0), num_hiddne_state)
+
+            pBlstm = nn.LSTM(input_size=x.size(2), hidden_size=num_hiddne_state, num_layers=1,
+                              batch_first=True, bidirectional=True)
+            output, _ = pBlstm(x, (hn, cn))
+
+            output = pyramid_stack(output)
+
+        h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
+        c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
+
+        output, _ = self.BLSTM2(output, (h0, c0))
+
         return output
+
+
+def pyramid_stack(inputs):
+
+    size = inputs.size()
+
+    if int(size[1]) % 2 == 1:
+        padded_inputs = F.pad(inputs, (0, 0, 0, 1, 0, 0))
+        sequence_length = int(size[1]) + 1
+    else:
+        padded_inputs = inputs
+        sequence_length = int(size[1])
+
+    odd_ind = torch.arange(1, sequence_length, 2, dtype=torch.long)
+    even_ind = torch.arange(0, sequence_length, 2, dtype=torch.long)
+
+    odd_inputs = padded_inputs[:, odd_ind, :]
+    even_inputs = padded_inputs[:, even_ind, :]
+
+    outputs_stacked = torch.cat([even_inputs, odd_inputs], 2)
+
+    return outputs_stacked
 
 
 class PredictionNet(nn.Module):
@@ -109,12 +145,12 @@ class PredictionNet(nn.Module):
     def forward(self, x):
         # Set initial states
         x = self.embedding(x)
-        output = self.lstm(x)
+        output, _ = self.lstm(x)
         return output
 
 
 class JointNetwork(nn.Module):
-    def __init__(self, num_classes=100, batch_size=50, hidden_nodes=2):
+    def __init__(self, num_classes=100, batch_size=20, hidden_nodes=2):
         super(JointNetwork, self).__init__()
         self.batch_size = batch_size
         self.hidden_nodes = hidden_nodes
@@ -123,8 +159,12 @@ class JointNetwork(nn.Module):
         self.linear = nn.Linear(in_features=self.reshaped, out_features=self.num_classes)
 
     def forward(self, encoder_output, prediction_output):
+        N = self.batch_size
+        T = 151
+        U = 29
+        H = self.hidden_nodes
 
-        encoder_output = encoder_output.view(self.battch_size, self.num_classes, self.hidden_nodes)
+        encoder_output = encoder_output.view(self.batch_size, 151, 29, self.hidden_nodes)
         prediction_output = prediction_output.view(self.battch_size, self.num_classes, self.hidden_nodes)
 
         encoder_output = self.linear(encoder_output)
