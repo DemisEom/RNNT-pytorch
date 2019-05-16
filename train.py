@@ -204,6 +204,7 @@ if __name__ == '__main__':
 
             # Forward pass
             encoder_output = encoder_model(inputs)
+            # prediction_network_output = prediction_network_model(targets)
             prediction_network_output = prediction_network_model(targets_one_hot)
             outputs = joint_network_model(encoder_output, prediction_network_output)
 

@@ -161,8 +161,8 @@ class JointNetwork(nn.Module):
         self.H = self.hidden_nodes
         self.output_feature = self.N * self.T * self.U * self.H
 
-        self.linear_enc = nn.Linear(in_features=12169, out_features=self.output_feature)
-        self.linear_pred = nn.Linear(in_features=653312, out_features=self.output_feature)
+        self.linear_enc = nn.Linear(in_features=120, out_features=self.output_feature)
+        self.linear_pred = nn.Linear(in_features=65, out_features=self.output_feature)
 
     def forward(self, encoder_output, prediction_output):
 
