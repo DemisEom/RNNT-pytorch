@@ -140,35 +140,37 @@ class PredictionNet(nn.Module):
         self.num_layers = num_layers
         self.embedding_size = embedding_size
         self.embedding = nn.Embedding(input_size, embedding_size)
-        self.lstm = nn.LSTM(embedding_size, hidden_size=512, num_layers=2, batch_first=True, bidirectional=True)
+        self.lstm = nn.LSTM(embedding_size, hidden_size=256, num_layers=2, batch_first=True)
 
     def forward(self, x):
-        # Set initial states
         x = self.embedding(x)
         output, _ = self.lstm(x)
         return output
 
 
 class JointNetwork(nn.Module):
-    def __init__(self, num_classes=100, batch_size=20, hidden_nodes=2):
+    def __init__(self, num_classes=29, batch_size=20, hidden_nodes=2):
         super(JointNetwork, self).__init__()
         self.batch_size = batch_size
         self.hidden_nodes = hidden_nodes
-        self.num_classes = num_classes
-        self.reshaped = batch_size * num_classes * hidden_nodes
-        self.linear = nn.Linear(in_features=self.reshaped, out_features=self.num_classes)
+
+        # reshape to "N x T x U x H"
+        self.N = batch_size
+        self.T = 151
+        self.U = 29
+        self.H = self.hidden_nodes
+        self.output_feature = self.N * self.T * self.U * self.H
+
+        self.linear_enc = nn.Linear(in_features=12169, out_features=self.output_feature)
+        self.linear_pred = nn.Linear(in_features=653312, out_features=self.output_feature)
 
     def forward(self, encoder_output, prediction_output):
-        N = self.batch_size
-        T = 151
-        U = 29
-        H = self.hidden_nodes
 
-        encoder_output = encoder_output.view(self.batch_size, 151, 29, self.hidden_nodes)
-        prediction_output = prediction_output.view(self.battch_size, self.num_classes, self.hidden_nodes)
+        encoder_output = self.linear_enc(encoder_output)
+        prediction_output = self.linear_pred(prediction_output)
 
-        encoder_output = self.linear(encoder_output)
-        prediction_output = self.linear(prediction_output)
+        encoder_output = encoder_output.view(self.N, self.T, self.U, self.H)
+        prediction_output = prediction_output.view(self.N, self.T, self.U, self.H)
 
         output = F.tanh(encoder_output + prediction_output)
 
