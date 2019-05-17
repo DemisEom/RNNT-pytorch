@@ -140,10 +140,12 @@ class PredictionNet(nn.Module):
         self.num_layers = num_layers
         self.embedding_size = embedding_size
         self.embedding = nn.Embedding(input_size, embedding_size)
+        self.embedd = nn.Linear(in_features=11, out_features=embedding_size)
         self.lstm = nn.LSTM(embedding_size, hidden_size=256, num_layers=2, batch_first=True)
 
     def forward(self, x):
-        x = self.embedding(x)
+        x = x.squeeze()
+        x = self.embedd(x)
         output, _ = self.lstm(x)
         return output
 
@@ -157,14 +159,17 @@ class JointNetwork(nn.Module):
         # reshape to "N x T x U x H"
         self.N = batch_size
         self.T = 151
-        self.U = 29
+        self.U = 11
         self.H = self.hidden_nodes
         self.output_feature = self.N * self.T * self.U * self.H
 
-        self.linear_enc = nn.Linear(in_features=120, out_features=self.output_feature)
-        self.linear_pred = nn.Linear(in_features=65, out_features=self.output_feature)
+        self.linear_enc = nn.Linear(in_features=12160, out_features=self.output_feature)
+        self.linear_pred = nn.Linear(in_features=148480, out_features=self.output_feature)
+        self.linear_feed_forward = nn.Linear(in_features=self.output_feature, out_features=num_classes)
 
     def forward(self, encoder_output, prediction_output):
+        encoder_output = encoder_output.reshape(1, -1)
+        prediction_output = prediction_output.reshape(1, -1)
 
         encoder_output = self.linear_enc(encoder_output)
         prediction_output = self.linear_pred(prediction_output)
@@ -172,7 +177,11 @@ class JointNetwork(nn.Module):
         encoder_output = encoder_output.view(self.N, self.T, self.U, self.H)
         prediction_output = prediction_output.view(self.N, self.T, self.U, self.H)
 
-        output = F.tanh(encoder_output + prediction_output)
+        output = encoder_output + prediction_output
+        output = nn.Tanh(output)
+        output = output.reshape(1, -1)
+
+        output = self.linear_feed_forward(output)
 
         return output
 

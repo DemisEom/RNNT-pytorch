@@ -238,80 +238,80 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         return self.size
 
 
-# def _collate_fn(batch):
-#     def func(p):
-#         return p[0].size(1)
-#
-#     batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
-#     minibatch_size = len(batch)
-#
-#     longest_sample = max(batch, key=func)[0]
-#     freq_size = longest_sample.size(0)
-#
-#     target_sizes = torch.IntTensor(minibatch_size)
-#     for x in range(minibatch_size):
-#         sample = batch[x]
-#         target = sample[1]
-#         target_sizes[x] = len(target)
-#
-#     max_seqlength = longest_sample.size(1)
-#     max_one_hot = max(target_sizes)
-#
-#     inputs = torch.zeros(minibatch_size, 1, freq_size, max_seqlength)
-#     targets_one_hot = torch.zeros(minibatch_size, 1, 29, max_one_hot)
-#
-#     input_percentages = torch.FloatTensor(minibatch_size)
-#
-#     targets = []
-#     for x in range(minibatch_size):
-#         temp_one_hot = torch.zeros(29, max_one_hot)
-#         sample = batch[x]
-#         tensor = sample[0]
-#         target = sample[1]
-#         target_one_hot_t = sample[2].transpose(1, 0)
-#         target_one_hot = sample[2]
-#
-#         seq_length = tensor.size(1)
-#         one_hot_length = target_one_hot.size(0)
-#
-#         inputs[x][0].narrow(1, 0, seq_length).copy_(tensor)
-#         targets_one_hot[x][0].narrow(1, 0, one_hot_length).copy_(target_one_hot_t)
-#
-#         input_percentages[x] = seq_length / float(max_seqlength)
-#
-#         targets.extend(target)
-#     targets = torch.IntTensor(targets)
-#     targets_one_hot.type(torch.LongTensor)
-#     return inputs, targets, input_percentages, target_sizes, targets_one_hot
-
 def _collate_fn(batch):
     def func(p):
         return p[0].size(1)
 
     batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
+    minibatch_size = len(batch)
+
     longest_sample = max(batch, key=func)[0]
     freq_size = longest_sample.size(0)
-    minibatch_size = len(batch)
-    max_seqlength = longest_sample.size(1)
-    inputs = torch.zeros(minibatch_size, 1, freq_size, max_seqlength)
-    input_percentages = torch.FloatTensor(minibatch_size)
+
     target_sizes = torch.IntTensor(minibatch_size)
-    targets = []
-    targets_one_hot = []
     for x in range(minibatch_size):
+        sample = batch[x]
+        target = sample[1]
+        target_sizes[x] = len(target)
+
+    max_seqlength = longest_sample.size(1)
+    max_one_hot = max(target_sizes)
+
+    inputs = torch.zeros(minibatch_size, 1, freq_size, max_seqlength)
+    targets_one_hot = torch.zeros(minibatch_size, 1, 29, max_one_hot)
+
+    input_percentages = torch.FloatTensor(minibatch_size)
+
+    targets = []
+    for x in range(minibatch_size):
+        temp_one_hot = torch.zeros(29, max_one_hot)
         sample = batch[x]
         tensor = sample[0]
         target = sample[1]
-        target_one_hot = torch.nn.functional.one_hot(torch.LongTensor(target), num_classes=29)
+        target_one_hot_t = sample[2].transpose(1, 0)
+        target_one_hot = sample[2]
+
         seq_length = tensor.size(1)
+        one_hot_length = target_one_hot.size(0)
+
         inputs[x][0].narrow(1, 0, seq_length).copy_(tensor)
+        targets_one_hot[x][0].narrow(1, 0, one_hot_length).copy_(target_one_hot_t)
+
         input_percentages[x] = seq_length / float(max_seqlength)
-        target_sizes[x] = len(target)
+
         targets.extend(target)
-        targets_one_hot.extend(target_one_hot.tolist())
-    targets = torch.LongTensor(targets)
-    targets_one_hot = torch.LongTensor(targets_one_hot)
+    targets = torch.IntTensor(targets)
+    targets_one_hot.type(torch.FloatTensor)
     return inputs, targets, input_percentages, target_sizes, targets_one_hot
+
+# def _collate_fn(batch):
+#     def func(p):
+#         return p[0].size(1)
+#
+#     batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
+#     longest_sample = max(batch, key=func)[0]
+#     freq_size = longest_sample.size(0)
+#     minibatch_size = len(batch)
+#     max_seqlength = longest_sample.size(1)
+#     inputs = torch.zeros(minibatch_size, 1, freq_size, max_seqlength)
+#     input_percentages = torch.FloatTensor(minibatch_size)
+#     target_sizes = torch.IntTensor(minibatch_size)
+#     targets = []
+#     targets_one_hot = []
+#     for x in range(minibatch_size):
+#         sample = batch[x]
+#         tensor = sample[0]
+#         target = sample[1]
+#         target_one_hot = torch.nn.functional.one_hot(torch.LongTensor(target), num_classes=29)
+#         seq_length = tensor.size(1)
+#         inputs[x][0].narrow(1, 0, seq_length).copy_(tensor)
+#         input_percentages[x] = seq_length / float(max_seqlength)
+#         target_sizes[x] = len(target)
+#         targets.extend(target)
+#         targets_one_hot.extend(target_one_hot.tolist())
+#     targets = torch.LongTensor(targets)
+#     targets_one_hot = torch.FloatTensor(targets_one_hot)
+#     return inputs, targets, input_percentages, target_sizes, targets_one_hot
 
 
 class AudioDataLoader(DataLoader):
