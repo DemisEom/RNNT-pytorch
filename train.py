@@ -61,15 +61,6 @@ parser.add_argument('--noise-min', default=0.0,
                     help='Minimum noise level to sample from. (1.0 means all noise, not original signal)', type=float)
 parser.add_argument('--noise-max', default=0.5,
                     help='Maximum noise levels to sample from. Maximum 1.0', type=float)
-parser.add_argument('--no-shuffle', dest='no_shuffle', action='store_true',
-                    help='Turn off shuffling and sample from dataset based on sequence length (smallest to largest)')
-parser.add_argument('--no-sortaGrad', dest='no_sorta_grad', action='store_true',
-                    help='Turn off ordering of dataset on sequence length for the first epoch.')
-parser.add_argument('--no-bidirectional', dest='bidirectional', action='store_false', default=True,
-                    help='Turn off bi-directional RNNs, introduces lookahead convolution')
-parser.add_argument('--dist-url', default='tcp://127.0.0.1:1550', type=str,
-                    help='url used to set up distributed training')
-parser.add_argument('--dist-backend', default='gloo', type=str, help='distributed backend')
 parser.add_argument('--world-size', default=1, type=int,
                     help='number of distributed processes')
 parser.add_argument('--rank', default=0, type=int,
@@ -220,5 +211,6 @@ if __name__ == '__main__':
             accuracy = (labels == argmax.squeeze()).float().mean()
 
             if (step + 1) % 100 == 0:
-                print('Step [{}/{}], Loss: {:.4f}, Acc: {:.2f}'
-                      .format(step + 1, total_step, loss.item(), accuracy.item()))
+                print(accuracy)
+            #     print('Step [{}/{}], Loss: {:.4f}, Acc: {:.2f}'
+            #           .format(step + 1, total_step, loss.item(), accuracy.item()))

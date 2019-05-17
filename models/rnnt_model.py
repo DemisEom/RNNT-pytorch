@@ -166,6 +166,7 @@ class JointNetwork(nn.Module):
         self.linear_enc = nn.Linear(in_features=12160, out_features=self.output_feature)
         self.linear_pred = nn.Linear(in_features=148480, out_features=self.output_feature)
         self.linear_feed_forward = nn.Linear(in_features=self.output_feature, out_features=num_classes)
+        self.tanH = nn.Tanh()
 
     def forward(self, encoder_output, prediction_output):
         encoder_output = encoder_output.reshape(1, -1)
@@ -178,7 +179,7 @@ class JointNetwork(nn.Module):
         prediction_output = prediction_output.view(self.N, self.T, self.U, self.H)
 
         output = encoder_output + prediction_output
-        output = nn.Tanh(output)
+        output = self.tanH(output)
         output = output.reshape(1, -1)
 
         output = self.linear_feed_forward(output)
