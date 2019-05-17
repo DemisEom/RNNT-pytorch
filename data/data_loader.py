@@ -281,7 +281,7 @@ def _collate_fn(batch):
 
         targets.extend(target)
     targets = torch.IntTensor(targets)
-    targets_one_hot.type(torch.FloatTensor)
+    targets_one_hot.type(torch.LongTensor)
     return inputs, targets, input_percentages, target_sizes, targets_one_hot
 
 # def _collate_fn(batch):

@@ -27,9 +27,6 @@ parser.add_argument('--labels-path', default='labels.json', help='Contains all c
 parser.add_argument('--window-size', default=.02, type=float, help='Window size for spectrogram in seconds')
 parser.add_argument('--window-stride', default=.01, type=float, help='Window stride for spectrogram in seconds')
 parser.add_argument('--window', default='hamming', help='Window type for spectrogram generation')
-parser.add_argument('--hidden-size', default=768, type=int, help='Hidden size of RNNs')
-parser.add_argument('--hidden-layers', default=7, type=int, help='Number of RNN layers')
-parser.add_argument('--rnn-type', default='gru', help='Type of the RNN. rnn|gru|lstm are supported')
 parser.add_argument('--activation-fn', default='relu', help='Specifies the activation function')
 parser.add_argument('--epochs', default=70, type=int, help='Number of training epochs')
 parser.add_argument('--cuda', dest='cuda', action='store_true', help='Use cuda to train model')
@@ -45,7 +42,6 @@ parser.add_argument('--checkpoint-overwrite', dest='checkpoint_overwrite', actio
 parser.add_argument('--visdom', dest='visdom', action='store_true', help='Turn on visdom graphing')
 parser.add_argument('--tensorboard', dest='tensorboard', action='store_true', help='Turn on tensorboard graphing')
 parser.add_argument('--log-dir', default='visualize/deepspeech_final', help='Location of tensorboard log')
-parser.add_argument('--log-params', dest='log_params', action='store_true', help='Log parameter values and gradients')
 parser.add_argument('--id', default='Deepspeech training', help='Identifier for visdom/tensorboard run')
 parser.add_argument('--save-folder', default='models/', help='Location to save epoch models')
 parser.add_argument('--model-path', default='models/deepspeech_final.pth',
@@ -179,7 +175,8 @@ if __name__ == '__main__':
 
 
     # Loss and optimizer
-    criterion = nn.Softmax()
+    criterion = nn.CrossEntropyLoss()
+    # criterion = RNNLoss()
     optimizer = torch.optim.Adam(joint_network_model.parameters(), lr=0.00001)
 
     # Start training
@@ -199,7 +196,9 @@ if __name__ == '__main__':
             outputs = joint_network_model(encoder_output, prediction_network_output)
 
             # Loss setting
-            loss = criterion(outputs, targets)
+            targets_one_hot = targets_one_hot.squeeze()
+            # outputs = outputs.type(torch.LongTensor)
+            loss = criterion(outputs, targets_one_hot)
 
             # Backward and optimize
             optimizer.zero_grad()
@@ -209,8 +208,3 @@ if __name__ == '__main__':
             # Compute accuracy
             _, argmax = torch.max(outputs, 1)
             accuracy = (labels == argmax.squeeze()).float().mean()
-
-            if (step + 1) % 100 == 0:
-                print(accuracy)
-            #     print('Step [{}/{}], Loss: {:.4f}, Acc: {:.2f}'
-            #           .format(step + 1, total_step, loss.item(), accuracy.item()))

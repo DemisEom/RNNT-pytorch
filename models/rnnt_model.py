@@ -155,22 +155,23 @@ class JointNetwork(nn.Module):
         super(JointNetwork, self).__init__()
         self.batch_size = batch_size
         self.hidden_nodes = hidden_nodes
+        self.num_classes = num_classes
 
         # reshape to "N x T x U x H"
         self.N = batch_size
         self.T = 151
         self.U = 11
         self.H = self.hidden_nodes
-        self.output_feature = self.N * self.T * self.U * self.H
+        self.output_feature = self.T * self.U * self.H
 
-        self.linear_enc = nn.Linear(in_features=12160, out_features=self.output_feature)
-        self.linear_pred = nn.Linear(in_features=148480, out_features=self.output_feature)
-        self.linear_feed_forward = nn.Linear(in_features=self.output_feature, out_features=num_classes)
+        self.linear_enc = nn.Linear(in_features=608, out_features=self.output_feature)
+        self.linear_pred = nn.Linear(in_features=7424, out_features=self.output_feature)
+        self.linear_feed_forward = nn.Linear(in_features=self.output_feature, out_features=num_classes*11)
         self.tanH = nn.Tanh()
 
     def forward(self, encoder_output, prediction_output):
-        encoder_output = encoder_output.reshape(1, -1)
-        prediction_output = prediction_output.reshape(1, -1)
+        encoder_output = encoder_output.reshape(self.batch_size, -1)
+        prediction_output = prediction_output.reshape(self.batch_size, -1)
 
         encoder_output = self.linear_enc(encoder_output)
         prediction_output = self.linear_pred(prediction_output)
@@ -180,9 +181,11 @@ class JointNetwork(nn.Module):
 
         output = encoder_output + prediction_output
         output = self.tanH(output)
-        output = output.reshape(1, -1)
+        output = output.reshape(self.batch_size, -1)
 
         output = self.linear_feed_forward(output)
+        output = output.view(self.batch_size, self.num_classes, self.U)
+        output = F.log_softmax(output, dim=2)
 
         return output
 
