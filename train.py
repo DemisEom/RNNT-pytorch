@@ -64,11 +64,13 @@ parser.add_argument('--rank', default=0, type=int,
 parser.add_argument('--gpu-rank', default=None,
                     help='If using distributed parallel for multi-gpu, sets the GPU for the process')
 parser.add_argument('--spec-augment', dest='spec_augment', action='store_true', help='using SpecAugment')
+parser.add_argument('--prediction_one_hot', default=False,
+                    help='Directory to inject noise into audio. If default, noise Inject not added')
 
 
 # setting seed
-torch.manual_seed(72160258)
-torch.cuda.manual_seed_all(72160258)
+# torch.manual_seed(72160258)
+# torch.cuda.manual_seed_all(72160258)
 
 
 if __name__ == '__main__':
@@ -159,10 +161,11 @@ if __name__ == '__main__':
     encoder_model = models.Encoder(audio_conf=audio_conf).to(device)
     print(encoder_model)
 
-    prediction_network_model = models.PredictionNet().to(device)
+    print(len(labels))
+    prediction_network_model = models.PredictionNet(labels_len=len(labels)).to(device)
     print(prediction_network_model)
 
-    joint_network_model = models.JointNetwork().to(device)
+    joint_network_model = models.JointNetwork(num_classes=len(labels)).to(device)
     print(joint_network_model)
 
     if args.distributed:
@@ -173,38 +176,36 @@ if __name__ == '__main__':
         joint_network_model = torch.nn.parallel.DistributedDataParallel(joint_network_model,
                                                                         device_ids=(int(args.gpu_rank),) if args.gpu_rank else None)
 
-
     # Loss and optimizer
-    criterion = nn.CrossEntropyLoss()
-    # criterion = RNNLoss()
     optimizer = torch.optim.Adam(joint_network_model.parameters(), lr=0.00001)
 
     # Start training
     for step in range(args.epochs):
         for i, (data) in enumerate(train_loader):
+
             if i == len(train_sampler):
                 break
 
-            inputs, targets, input_percentages, target_sizes, targets_one_hot = data
+            inputs, targets, input_percentages, target_sizes, targets_one_hot, targets_list, labels_map = data
+
             input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
 
             inputs = inputs.to(device)
 
             # Forward pass
             encoder_output = encoder_model(inputs)
-            prediction_network_output = prediction_network_model(targets_one_hot)
-            outputs = joint_network_model(encoder_output, prediction_network_output)
+            prediction_network_output = prediction_network_model(targets_list, one_hot=False)
+
+            loss = joint_network_model(encoder_output, prediction_network_output,
+                                       inputs, input_sizes, targets_list, target_sizes)
 
             # Loss setting
-            targets_one_hot = targets_one_hot.squeeze()
-            # outputs = outputs.type(torch.LongTensor)
-            loss = criterion(outputs, targets_one_hot)
-
             # Backward and optimize
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            # Compute accuracy
-            _, argmax = torch.max(outputs, 1)
-            accuracy = (labels == argmax.squeeze()).float().mean()
+            loss = float(loss.data) * len(input_sizes)
+            print(loss)
+
+

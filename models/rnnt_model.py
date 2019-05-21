@@ -1,40 +1,9 @@
 import math
 import torch
+import torch.autograd
 import torch.nn as nn
 import torch.nn.functional as F
-
-
-# simple cnn network
-class CNN(nn.Module):
-    def __init__(self):
-        super(CNN, self).__init__()
-        # 1 input image channel, 6 output channels, 5x5 square convolution
-        # kernel
-        self.conv1 = nn.Conv2d(1, 6, 5)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        # an affine operation: y = Wx + b
-        self.fc1 = nn.Linear(16 * 5 * 5, 120)
-        self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 10)
-
-    def forward(self, x):
-        # Max pooling over a (2, 2) window
-        x = F.max_pool2d(F.relu(self.conv1(x)), (2, 2))
-        # If the size is a square you can only specify a single number
-        x = F.max_pool2d(F.relu(self.conv2(x)), 2)
-        x = x.view(-1, self.num_flat_features(x))
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
-
-    def num_flat_features(self, x):
-        size = x.size()[1:]  # all dimensions except the batch dimension
-        num_features = 1
-        for s in size:
-            num_features *= s
-        return num_features
-
+from models.transducer_np import RNNTLoss
 
 # Bidirectional recurrent neural network
 class BiRNN(nn.Module):
@@ -59,7 +28,7 @@ class BiRNN(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, hidden_size=4, num_layers_pBLSTM=4, num_layers=4, num_classes=10, audio_conf=None):
+    def __init__(self, hidden_size=256, num_layers_pBLSTM=4, num_layers=4, audio_conf=None):
         super(Encoder, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -69,20 +38,16 @@ class Encoder(nn.Module):
         self.conv_2 = nn.Conv2d(1, 1, (6, 6), stride=1)
         self.audio_conf = audio_conf
 
-        self.BLSTM = nn.LSTM(91, hidden_size=self.hidden_size, num_layers=self.num_layers,
+        self.BLSTM = nn.LSTM(190, hidden_size=self.hidden_size, num_layers=self.num_layers,
                              batch_first=True, bidirectional=True)
-        self.pBLSTM = nn.LSTM(8, hidden_size=self.hidden_size, num_layers=1,
-                              batch_first=True, bidirectional=True)
         self.BLSTM2 = nn.LSTM(8, hidden_size=self.hidden_size, num_layers=self.num_layers,
                              batch_first=True, bidirectional=True)
-
-        self.fc = nn.Linear(hidden_size * 2, num_classes)
 
     def forward(self, x):
         x = self.conv_1(x)
         x = self.conv_2(x)
 
-        x = x.view(x.size(0), x.size(2), x.size(3))
+        x = x.squeeze()
 
         h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
         c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
@@ -134,24 +99,30 @@ def pyramid_stack(inputs):
 
 
 class PredictionNet(nn.Module):
-    def __init__(self, input_size=29, embedding_size=20, hidden_size=4, num_layers=4):
+    def __init__(self, labels_len, embedding_size=20, hidden_size=512, num_layers=2):
         super(PredictionNet, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.embedding_size = embedding_size
-        self.embedding = nn.Embedding(input_size, embedding_size)
-        self.embedd = nn.Linear(in_features=11, out_features=embedding_size)
-        self.lstm = nn.LSTM(embedding_size, hidden_size=256, num_layers=2, batch_first=True)
+        self.embedding = nn.Embedding(labels_len, labels_len-1, padding_idx=1)
+        self.embedding_one_hot = nn.Linear(in_features=labels_len, out_features=embedding_size)
+        self.lstm = nn.LSTM(labels_len-1, hidden_size=hidden_size, num_layers=num_layers, batch_first=True)
 
-    def forward(self, x):
-        x = x.squeeze()
-        x = self.embedd(x)
-        output, _ = self.lstm(x)
+    def forward(self, x, one_hot=False):
+        zero = torch.zeros((x.shape[0], 1), dtype=torch.long)
+        x_mat = torch.cat((zero, x), dim=1)
+
+        if True == one_hot:
+            x_mat = self.embedding_one_hot(x_mat)
+        else:
+            x_mat = self.embedding(x_mat)
+
+        output, _ = self.lstm(x_mat)
         return output
 
 
 class JointNetwork(nn.Module):
-    def __init__(self, num_classes=29, batch_size=20, hidden_nodes=2):
+    def __init__(self, num_classes, batch_size=20, hidden_nodes=2):
         super(JointNetwork, self).__init__()
         self.batch_size = batch_size
         self.hidden_nodes = hidden_nodes
@@ -159,17 +130,25 @@ class JointNetwork(nn.Module):
 
         # reshape to "N x T x U x H"
         self.N = batch_size
-        self.T = 151
-        self.U = 11
+        self.T = 76
+        self.U = 20
         self.H = self.hidden_nodes
         self.output_feature = self.T * self.U * self.H
 
-        self.linear_enc = nn.Linear(in_features=608, out_features=self.output_feature)
-        self.linear_pred = nn.Linear(in_features=7424, out_features=self.output_feature)
+        self.linear_enc = nn.Linear(in_features=38912, out_features=self.output_feature)
+        self.linear_pred = nn.Linear(in_features=10752, out_features=self.output_feature)
         self.linear_feed_forward = nn.Linear(in_features=self.output_feature, out_features=num_classes*11)
         self.tanH = nn.Tanh()
 
-    def forward(self, encoder_output, prediction_output):
+        self.loss = RNNTLoss()
+
+        self.fc1 = nn.Linear(hidden_nodes, hidden_nodes)
+        self.fc2 = nn.Linear(hidden_nodes, num_classes)
+
+    def forward(self, encoder_output, prediction_output, xs, xlen, ys, ylen):
+        # print(encoder_output.size())
+        # print(prediction_output.size())
+
         encoder_output = encoder_output.reshape(self.batch_size, -1)
         prediction_output = prediction_output.reshape(self.batch_size, -1)
 
@@ -180,12 +159,26 @@ class JointNetwork(nn.Module):
         prediction_output = prediction_output.view(self.N, self.T, self.U, self.H)
 
         output = encoder_output + prediction_output
+        output = self.fc2(output)
         output = self.tanH(output)
-        output = output.reshape(self.batch_size, -1)
 
-        output = self.linear_feed_forward(output)
-        output = output.view(self.batch_size, self.num_classes, self.U)
-        output = F.log_softmax(output, dim=2)
+        # output = output.reshape(self.batch_size, -1)
 
-        return output
+        # output = self.linear_feed_forward(output)
+        # output = output.view(self.batch_size, self.num_classes, self.U)
+        output = F.log_softmax(output, dim=3)
+
+        xlen_temp = [i.shape[0] for i in output]
+        xlen = torch.LongTensor(xlen_temp)
+
+        # ys_temp = ys.view(1, -1)
+        loss = self.loss(output, ys, xlen, ylen)
+        """
+        acts: Tensor of (batch x seqLength x labelLength x outputDim) containing output from network
+        labels: 2 dimensional Tensor containing all the targets of the batch with zero padded
+        act_lens: Tensor of size (batch) containing size of each output sequence from the network
+        label_lens: Tensor of (batch) containing label length of each example
+        """
+
+        return loss
 
