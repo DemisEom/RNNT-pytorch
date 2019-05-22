@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.autograd
 import torch.nn as nn
@@ -136,7 +135,7 @@ class JointNetwork(nn.Module):
         self.output_feature = self.T * self.U * self.H
 
         self.linear_enc = nn.Linear(in_features=38912, out_features=self.output_feature)
-        self.linear_pred = nn.Linear(in_features=10752, out_features=self.output_feature)
+        self.linear_pred = nn.Linear(in_features=15872, out_features=self.output_feature)
         self.linear_feed_forward = nn.Linear(in_features=self.output_feature, out_features=num_classes*11)
         self.tanH = nn.Tanh()
 

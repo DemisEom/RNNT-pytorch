@@ -9,10 +9,16 @@ implementing of "EXPLORING RNN-TRANSDUCER FOR CHINESE SPEECH RECOGNITION"
     ~~1. joint network에서 각각 FC layer를 거쳐서 사이즈를 통일.~~
  
     
-3. loss 부분은 어떻게 할거임...?
-    1. warp RNNT Loss 사용(있는거를 쓰자)
-    2. 구현하자.
-        1. input과 target의 dim, shape는 어떻게 해야할까?
+~~3. loss 부분은 어떻게 할거임...?~~
+    ~~1. warp RNNT Loss 사용(있는거를 쓰자)~~
+    ~~2. 구현하자.~~
+        ~~1. input과 target의 dim, shape는 어떻게 해야할까?~~
 
 4. learning rate sharping
 5. initialize prediction network
+6. 특징 추출을 두가지 방식으로 작동되게 하기.
+    1. mel spectrogram
+    2. mel filterbank
+7. 코드 리팩토링.
+    1. 불필요한 파서들 제거.
+    
