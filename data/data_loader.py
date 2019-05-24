@@ -23,6 +23,30 @@ windows = {'hamming': scipy.signal.hamming, 'hann': scipy.signal.hann, 'blackman
            'bartlett': scipy.signal.bartlett}
 
 
+def mel_filter_bank(inpus):
+    low_freq_mel = 0
+    high_freq_mel = (2595 * numpy.log10(1 + (sample_rate / 2) / 700))  # Convert Hz to Mel
+    mel_points = numpy.linspace(low_freq_mel, high_freq_mel, nfilt + 2)  # Equally spaced in Mel scale
+    hz_points = (700 * (10 ** (mel_points / 2595) - 1))  # Convert Mel to Hz
+    bin = numpy.floor((NFFT + 1) * hz_points / sample_rate)
+
+    fbank = numpy.zeros((nfilt, int(numpy.floor(NFFT / 2 + 1))))
+    for m in range(1, nfilt + 1):
+        f_m_minus = int(bin[m - 1])  # left
+        f_m = int(bin[m])  # center
+        f_m_plus = int(bin[m + 1])  # right
+
+        for k in range(f_m_minus, f_m):
+            fbank[m - 1, k] = (k - bin[m - 1]) / (bin[m] - bin[m - 1])
+        for k in range(f_m, f_m_plus):
+            fbank[m - 1, k] = (bin[m + 1] - k) / (bin[m + 1] - bin[m])
+    filter_banks = numpy.dot(pow_frames, fbank.T)
+    filter_banks = numpy.where(filter_banks == 0, numpy.finfo(float).eps, filter_banks)  # Numerical Stability
+    filter_banks = 20 * numpy.log10(filter_banks)  # dB
+
+    return filter_banks
+
+
 def zero_pad_concat(inputs):
     max_t = max(len(inp) for inp in inputs)
     shape = (len(inputs), max_t) + inputs[0].shape[1:]
@@ -33,12 +57,13 @@ def zero_pad_concat(inputs):
 
 
 def end_pad_label(inputs):
-    # max_t = max(len(i) for i in inputs)
-    max_t = 30
+    max_t = max(len(i) for i in inputs)
+    # max_t = 50
     shape = (len(inputs), max_t)
     labels = np.full(shape, fill_value=0, dtype='i')
     for e, l in enumerate(inputs):
         labels[e, :len(l)] = l
+
     return labels
 
 
@@ -201,6 +226,7 @@ class SpectrogramParser(AudioParser):
         # S = log(S+1)
         spect = np.log1p(spect)
         spect = torch.FloatTensor(spect)
+
         if self.specaugment:
             spect = time_mask(freq_mask(time_warp(spect), num_masks=2), num_masks=2)
             spect = spect.view(spect.shape[1],spect.shape[2])
@@ -209,6 +235,8 @@ class SpectrogramParser(AudioParser):
             std = spect.std()
             spect.add_(-mean)
             spect.div_(std)
+
+        # print(spect.size())
 
         return spect
 
@@ -244,6 +272,7 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         audio_path, transcript_path = sample[0], sample[1]
         spect = self.parse_audio(audio_path)
         transcript = self.parse_transcript(transcript_path)
+        # print(spect.size(), len(transcript))
         transcript_one_hot = torch.nn.functional.one_hot(torch.LongTensor(transcript), num_classes=len(self.labels_map))
         return spect, transcript, transcript_one_hot, self.labels_map
 
@@ -265,8 +294,8 @@ def _collate_fn(batch):
     longest_sample = max(batch, key=func)[0]
     freq_size = longest_sample.size(0)
     minibatch_size = len(batch)
-    # max_seqlength = longest_sample.size(1)
-    max_seqlength = 200
+    max_seqlength = longest_sample.size(1)
+    # max_seqlength = 200
     inputs = torch.zeros(minibatch_size, 1, freq_size, max_seqlength)
     input_percentages = torch.FloatTensor(minibatch_size)
     target_sizes = torch.IntTensor(minibatch_size)
@@ -293,7 +322,9 @@ def _collate_fn(batch):
     targets_list = torch.LongTensor(targets_list)
     targets_one_hot = torch.FloatTensor(targets_one_hot)
     labels_map = sample[3]
+
     return inputs, targets, input_percentages, target_sizes, targets_one_hot, targets_list, labels_map
+
 
 class AudioDataLoader(DataLoader):
     def __init__(self, *args, **kwargs):
@@ -324,6 +355,26 @@ class BucketingSampler(Sampler):
 
     def shuffle(self, epoch):
         np.random.shuffle(self.bins)
+
+
+class BatchRandomSampler(Sampler):
+    """
+    Batches the data consecutively and randomly samples
+    by batch without replacement.
+    """
+
+    def __init__(self, data_source, batch_size):
+        it_end = len(data_source) - batch_size + 1
+        self.batches = [range(i, i + batch_size)
+                for i in range(0, it_end, batch_size)]
+        self.data_source = data_source
+
+    def __iter__(self):
+        random.shuffle(self.batches)
+        return (i for b in self.batches for i in b)
+
+    def __len__(self):
+        return len(self.data_source)
 
 
 class DistributedBucketingSampler(Sampler):

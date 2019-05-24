@@ -1,6 +1,8 @@
 # RNNT-pytorch
-implementing of "EXPLORING RNN-TRANSDUCER FOR CHINESE SPEECH RECOGNITION"
+Implementation of "EXPLORING RNN-TRANSDUCER FOR CHINESE SPEECH RECOGNITION"
+
 ---
+
 ## TO DO....
 ~~1. prediction network에서 one-hot 벡터를 어떻게 임베딩 할것인지.~~  
 ~~임베딩을 워드 임베딩에 국한해서 생각하는게 아니라 본질적으로는 dimension reduction 이라는걸 생각하자.~~  
@@ -22,3 +24,11 @@ implementing of "EXPLORING RNN-TRANSDUCER FOR CHINESE SPEECH RECOGNITION"
 7. 코드 리팩토링.
     1. 불필요한 파서들 제거.
     
+    
+    
+---
+## Reference
+1. EXPLORING RNN-TRANSDUCER FOR CHINESE SPEECH RECOGNITION
+2. 
+3.
+4.

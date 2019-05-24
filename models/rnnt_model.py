@@ -4,27 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models.transducer_np import RNNTLoss
 
-# Bidirectional recurrent neural network
-class BiRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, num_classes):
-        super(BiRNN, self).__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, bidirectional=True)
-        self.fc = nn.Linear(hidden_size * 2, num_classes)  # 2 for bidirection
-
-    def forward(self, x):
-        # Set initial states
-        h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)  # 2 for bidirection
-        c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
-
-        # Forward propagate LSTM
-        output, _ = self.lstm(x, (h0, c0))  # out: tensor of shape (batch_size, seq_length, hidden_size*2)
-
-        # Decode the hidden state of the last time step
-        out = self.fc(output[:, -1, :])
-        return output
-
 
 class Encoder(nn.Module):
     def __init__(self, hidden_size=256, num_layers_pBLSTM=4, num_layers=4, audio_conf=None):
@@ -33,11 +12,11 @@ class Encoder(nn.Module):
         self.num_layers = num_layers
         self.num_layers_pBLSTM = num_layers_pBLSTM
         self.num_hidden_pBLSTM = 2 ** num_layers_pBLSTM
-        self.conv_1 = nn.Conv2d(1, 1, (6, 6), stride=1)
-        self.conv_2 = nn.Conv2d(1, 1, (6, 6), stride=1)
+        self.conv_1 = nn.Conv2d(1, 1, (6, 6), stride=1, padding=0)
+        self.conv_2 = nn.Conv2d(1, 1, (6, 6), stride=1, padding=0)
         self.audio_conf = audio_conf
 
-        self.BLSTM = nn.LSTM(190, hidden_size=self.hidden_size, num_layers=self.num_layers,
+        self.BLSTM = nn.LSTM(151, hidden_size=self.hidden_size, num_layers=self.num_layers,
                              batch_first=True, bidirectional=True)
         self.BLSTM2 = nn.LSTM(8, hidden_size=self.hidden_size, num_layers=self.num_layers,
                              batch_first=True, bidirectional=True)
@@ -47,6 +26,8 @@ class Encoder(nn.Module):
         x = self.conv_2(x)
 
         x = x.squeeze()
+        x = torch.transpose(x, 1, 2)
+        # print(x.size())
 
         h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
         c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
@@ -111,6 +92,7 @@ class PredictionNet(nn.Module):
         zero = torch.zeros((x.shape[0], 1), dtype=torch.long)
         x_mat = torch.cat((zero, x), dim=1)
 
+        # select prediction networks input as one-hot vector or mapping number
         if True == one_hot:
             x_mat = self.embedding_one_hot(x_mat)
         else:
@@ -130,47 +112,41 @@ class JointNetwork(nn.Module):
         # reshape to "N x T x U x H"
         self.N = batch_size
         self.T = 76
-        self.U = 20
+        self.U = 50
         self.H = self.hidden_nodes
         self.output_feature = self.T * self.U * self.H
 
-        self.linear_enc = nn.Linear(in_features=38912, out_features=self.output_feature)
-        self.linear_pred = nn.Linear(in_features=15872, out_features=self.output_feature)
+        self.linear_enc = nn.Linear(in_features=512, out_features=self.output_feature)
+        self.linear_pred = nn.Linear(in_features=512, out_features=self.output_feature)
         self.linear_feed_forward = nn.Linear(in_features=self.output_feature, out_features=num_classes*11)
         self.tanH = nn.Tanh()
 
         self.loss = RNNTLoss()
 
         self.fc1 = nn.Linear(hidden_nodes, hidden_nodes)
-        self.fc2 = nn.Linear(hidden_nodes, num_classes)
+        self.fc2 = nn.Linear(7600, num_classes)
 
     def forward(self, encoder_output, prediction_output, xs, xlen, ys, ylen):
-        # print(encoder_output.size())
-        # print(prediction_output.size())
-
-        encoder_output = encoder_output.reshape(self.batch_size, -1)
-        prediction_output = prediction_output.reshape(self.batch_size, -1)
+        encoder_output = torch.unsqueeze(encoder_output, dim=2)
+        prediction_output = torch.unsqueeze(prediction_output, dim=1)
+        # encoder_output = encoder_output.reshape(self.batch_size, -1)
+        # prediction_output = prediction_output.reshape(self.batch_size, -1)
 
         encoder_output = self.linear_enc(encoder_output)
         prediction_output = self.linear_pred(prediction_output)
 
-        encoder_output = encoder_output.view(self.N, self.T, self.U, self.H)
-        prediction_output = prediction_output.view(self.N, self.T, self.U, self.H)
+        # encoder_output = encoder_output.view(self.N, self.T, self.U, self.H)
+        # prediction_output = prediction_output.view(self.N, self.T, self.U, self.H)
 
         output = encoder_output + prediction_output
         output = self.fc2(output)
         output = self.tanH(output)
 
-        # output = output.reshape(self.batch_size, -1)
-
-        # output = self.linear_feed_forward(output)
-        # output = output.view(self.batch_size, self.num_classes, self.U)
         output = F.log_softmax(output, dim=3)
 
         xlen_temp = [i.shape[0] for i in output]
         xlen = torch.LongTensor(xlen_temp)
 
-        # ys_temp = ys.view(1, -1)
         loss = self.loss(output, ys, xlen, ylen)
         """
         acts: Tensor of (batch x seqLength x labelLength x outputDim) containing output from network

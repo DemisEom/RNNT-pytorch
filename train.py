@@ -67,11 +67,9 @@ parser.add_argument('--spec-augment', dest='spec_augment', action='store_true', 
 parser.add_argument('--prediction_one_hot', default=False,
                     help='Directory to inject noise into audio. If default, noise Inject not added')
 
-
 # setting seed
 # torch.manual_seed(72160258)
 # torch.cuda.manual_seed_all(72160258)
-
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -147,11 +145,13 @@ if __name__ == '__main__':
                                        normalize=True, augment=args.augment, specaugment=False)
     test_dataset = SpectrogramDataset(audio_conf=audio_conf, manifest_filepath=args.val_manifest, labels=labels,
                                       normalize=True, augment=False, specaugment=False)
+
     if not args.distributed:
         train_sampler = BucketingSampler(train_dataset, batch_size=args.batch_size)
     else:
         train_sampler = DistributedBucketingSampler(train_dataset, batch_size=args.batch_size,
                                                     num_replicas=args.world_size, rank=args.rank)
+
     train_loader = AudioDataLoader(train_dataset,
                                    num_workers=args.num_workers, batch_sampler=train_sampler)
     test_loader = AudioDataLoader(test_dataset, batch_size=args.batch_size,
@@ -181,6 +181,9 @@ if __name__ == '__main__':
 
     # Start training
     for step in range(args.epochs):
+        total_loss = 0
+        temp_losses = []
+        start_time = time.time()
         for i, (data) in enumerate(train_loader):
 
             if i == len(train_sampler):
@@ -203,9 +206,27 @@ if __name__ == '__main__':
             # Backward and optimize
             optimizer.zero_grad()
             loss.backward()
-            optimizer.step()
 
-            loss = float(loss.data) * len(input_sizes)
             print(loss)
+
+            # loss = float(loss.data) * len(input_sizes)
+            # total_loss += loss
+            # losses.append(loss)
+
+            # if args.gradclip:
+            #     grad_norm = nn.utils.clip_grad_norm(model.parameters(), 200)
+            # optimizer.step()
+            #
+            # if args.gradclip:
+            #     tb.log_value('train_grad_norm', grad_norm, tri)
+            # tri += 1
+
+            if i % 100 == 0 and i > 0:
+                temp_losses = total_loss / 20 / 100
+                print('[Epoch %d Batch %d] loss %.2f'%(step, i, temp_losses))
+                total_loss = 0
+
+        losses = sum(losses) / len(train_loader)
+
 
 
