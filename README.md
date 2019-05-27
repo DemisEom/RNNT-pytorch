@@ -1,34 +1,39 @@
-# RNNT-pytorch
+RNNT-pytorch  
+---
 Implementation of "EXPLORING RNN-TRANSDUCER FOR CHINESE SPEECH RECOGNITION"
 
+Installation
 ---
+0. pip isntall -r requirments.txt
+1. Install torch  
+2. Install rnnt loss  
+[hawk aron's implementation](https://github.com/HawkAaron/warp-transducer/tree/master/pytorch_binding)  
+```
+## ref hawk aron's read me
+git clone https://github.com/HawkAaron/warp-transducer
+cd warp-transducer
+mkdir build; cd build
+cmake ..
+make
 
-## TO DO....
-~~1. prediction network에서 one-hot 벡터를 어떻게 임베딩 할것인지.~~  
-~~임베딩을 워드 임베딩에 국한해서 생각하는게 아니라 본질적으로는 dimension reduction 이라는걸 생각하자.~~  
+cd pytorch_binding
+python setup.py install
+```  
+3. install torch audio
 
-~~2. joint네트워크에서 두개의 아웃풋 사이즈를 어떻게 맞출것인지.~~  
-    ~~1. joint network에서 각각 FC layer를 거쳐서 사이즈를 통일.~~
- 
-    
-~~3. loss 부분은 어떻게 할거임...?~~
-    ~~1. warp RNNT Loss 사용(있는거를 쓰자)~~
-    ~~2. 구현하자.~~
-        ~~1. input과 target의 dim, shape는 어떻게 해야할까?~~
-
-4. learning rate sharping
-5. initialize prediction network
-6. 특징 추출을 두가지 방식으로 작동되게 하기.
-    1. mel spectrogram
-    2. mel filterbank
-7. 코드 리팩토링.
-    1. 불필요한 파서들 제거.
-    
-    
-    
+TO DO
 ---
-## Reference
-1. EXPLORING RNN-TRANSDUCER FOR CHINESE SPEECH RECOGNITION
-2. 
-3.
-4.
+1. learning rate sharping
+2. initialize prediction network
+3. 특징 추출을 두가지 방식으로 작동되게 하기.
+    1. mel filterbank
+4. 차원 점검하기.
+5. RNNTLOSS 가져오는거 세팅 편리하게 하기.
+6. 불필요한 파서들 제거.
+    
+    
+References
+---
+1. [EXPLORING RNN-TRANSDUCER FOR CHINESE SPEECH RECOGNITION](https://arxiv.org/pdf/1811.05097.pdf)
+2. [speech, RNNT Loss by awni](https://github.com/awni/speech)
+3. [E2E-ASR by hawk aron](https://github.com/HawkAaron/E2E-ASR)

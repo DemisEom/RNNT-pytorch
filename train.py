@@ -1,7 +1,4 @@
 import models.rnnt_model as models
-import torch.nn as nn
-import torchvision
-from torchvision import transforms
 from logger import Logger
 from data.data_loader import AudioDataLoader, SpectrogramDataset, BucketingSampler, DistributedBucketingSampler
 
@@ -68,8 +65,8 @@ parser.add_argument('--prediction_one_hot', default=False,
                     help='Directory to inject noise into audio. If default, noise Inject not added')
 
 # setting seed
-# torch.manual_seed(72160258)
-# torch.cuda.manual_seed_all(72160258)
+torch.manual_seed(72160258)
+torch.cuda.manual_seed_all(72160258)
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -78,6 +75,7 @@ if __name__ == '__main__':
 
     # Device configuration
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(device)
 
     if args.distributed:
         if args.gpu_rank:
@@ -181,9 +179,11 @@ if __name__ == '__main__':
 
     # Start training
     for step in range(args.epochs):
+
         total_loss = 0
-        temp_losses = []
+        totloss = 0; losses = []
         start_time = time.time()
+
         for i, (data) in enumerate(train_loader):
 
             if i == len(train_sampler):
@@ -207,23 +207,23 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             loss.backward()
 
-            print(loss)
-
-            # loss = float(loss.data) * len(input_sizes)
-            # total_loss += loss
-            # losses.append(loss)
+            loss = float(loss.data) * len(input_sizes)
+            total_loss += loss
+            losses.append(loss)
 
             # if args.gradclip:
             #     grad_norm = nn.utils.clip_grad_norm(model.parameters(), 200)
-            # optimizer.step()
-            #
+
+            optimizer.step()
+
+
             # if args.gradclip:
             #     tb.log_value('train_grad_norm', grad_norm, tri)
             # tri += 1
 
-            if i % 100 == 0 and i > 0:
+            if i % 10 == 0 and i > 0:
                 temp_losses = total_loss / 20 / 100
-                print('[Epoch %d Batch %d] loss %.2f'%(step, i, temp_losses))
+                print('[Epoch %d Batch %d] loss %.2f' %(step, i, temp_losses))
                 total_loss = 0
 
         losses = sum(losses) / len(train_loader)
