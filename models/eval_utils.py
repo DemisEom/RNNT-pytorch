@@ -74,8 +74,8 @@ def eval_dev(model, ldr,
     return loss, cer
 
 
-def infer(self, batch, beam_size=4):
-    out = self(batch)
+def infer(batch, beam_size=4):
+    out = batch
     out = out.cpu().data.numpy()
     preds = []
     for e, (i, l) in enumerate(zip(*batch)):
