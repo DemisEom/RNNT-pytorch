@@ -111,7 +111,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.distributed = args.world_size > 1
     main_proc = True
-    device = torch.device("cuda" if args.cuda else "cpu")
+
     if args.distributed:
         if args.gpu_rank:
             torch.cuda.set_device(int(args.gpu_rank))
@@ -194,10 +194,14 @@ if __name__ == '__main__':
             input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
 
             inputs = inputs.to(device)
+            targets_list = targets_list.to(device)
 
             # Forward pass
             encoder_output = encoder_model(inputs)
             prediction_network_output = prediction_network_model(targets_list, one_hot=False)
+
+            encoder_output = encoder_output.to(device)
+            prediction_network_output = prediction_network_output.to(device)
 
             loss = joint_network_model(encoder_output, prediction_network_output,
                                        inputs, input_sizes, targets_list, target_sizes)

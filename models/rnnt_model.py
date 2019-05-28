@@ -29,30 +29,32 @@ class Encoder(nn.Module):
         x = x.squeeze()
         x = torch.transpose(x, 1, 2)
         # print(x.size())
+        #
+        # h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
+        # c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
 
-        h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
-        c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
-
-        x, h_c_0 = self.BLSTM(x, (h0, c0))
+        x, h_c_0 = self.BLSTM(x)
 
         num_hiddne_state = self.num_hidden_pBLSTM
 
         for i in range(self.num_layers_pBLSTM-1):
             num_hiddne_state = int(num_hiddne_state / (i + 1))
 
-            hn = torch.zeros(1 * 2, x.size(0), num_hiddne_state)
-            cn = torch.zeros(1 * 2, x.size(0), num_hiddne_state)
+            # hn = torch.zeros(1 * 2, x.size(0), num_hiddne_state)
+            # cn = torch.zeros(1 * 2, x.size(0), num_hiddne_state)
 
             pBlstm = nn.LSTM(input_size=x.size(2), hidden_size=num_hiddne_state, num_layers=1,
                               batch_first=True, bidirectional=True)
-            output, _ = pBlstm(x, (hn, cn))
+            # output, _ = pBlstm(x, (hn, cn))
+            output, _ = pBlstm(x)
 
             output = pyramid_stack(output)
 
-        h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
-        c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
+        # h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
+        # c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
 
-        output, _ = self.BLSTM2(output, (h0, c0))
+        # output, _ = self.BLSTM2(output, (h0, c0))
+        output, _ = self.BLSTM2(output)
 
         return output
 
@@ -148,6 +150,9 @@ class JointNetwork(nn.Module):
         xlen_temp = [i.shape[0] for i in output]
         xlen = torch.LongTensor(xlen_temp)
 
+        ys = ys.type(torch.int32)
+        xlen = xlen.type(torch.int32)
+        ylen = ylen.type(torch.int32)
         loss = self.loss(output, ys, xlen, ylen)
         """
         acts: Tensor of (batch x seqLength x labelLength x outputDim) containing output from network

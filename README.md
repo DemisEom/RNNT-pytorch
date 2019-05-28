@@ -21,7 +21,7 @@ python setup.py install
 ```  
 3. install torch audio
 
-TO DO
+TO DO Things
 ---
 1. learning rate sharping
 2. initialize prediction network
