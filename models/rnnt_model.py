@@ -7,7 +7,7 @@ from warprnnt_pytorch import RNNTLoss
 
 
 class Encoder(nn.Module):
-    def __init__(self, hidden_size=256, num_layers_pBLSTM=4, num_layers=4, audio_conf=None):
+    def __init__(self, hidden_size=256, num_layers_pBLSTM=2, num_layers=1, audio_conf=None):
         super(Encoder, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -19,7 +19,7 @@ class Encoder(nn.Module):
 
         self.BLSTM = nn.LSTM(151, hidden_size=self.hidden_size, num_layers=self.num_layers,
                              batch_first=True, bidirectional=True)
-        self.BLSTM2 = nn.LSTM(8, hidden_size=self.hidden_size, num_layers=self.num_layers,
+        self.BLSTM2 = nn.LSTM(16, hidden_size=self.hidden_size, num_layers=self.num_layers,
                              batch_first=True, bidirectional=True)
 
     def forward(self, x):
@@ -28,33 +28,22 @@ class Encoder(nn.Module):
 
         x = x.squeeze()
         x = torch.transpose(x, 1, 2)
-        # print(x.size())
-        #
-        # h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
-        # c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
 
-        x, h_c_0 = self.BLSTM(x)
+        x, _ = self.BLSTM(x)
 
         num_hiddne_state = self.num_hidden_pBLSTM
 
         for i in range(self.num_layers_pBLSTM-1):
             num_hiddne_state = int(num_hiddne_state / (i + 1))
 
-            # hn = torch.zeros(1 * 2, x.size(0), num_hiddne_state)
-            # cn = torch.zeros(1 * 2, x.size(0), num_hiddne_state)
-
             pBlstm = nn.LSTM(input_size=x.size(2), hidden_size=num_hiddne_state, num_layers=1,
-                              batch_first=True, bidirectional=True)
-            # output, _ = pBlstm(x, (hn, cn))
+                              batch_first=True, bidirectional=True).cuda()
             output, _ = pBlstm(x)
 
             output = pyramid_stack(output)
+            x = output
 
-        # h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
-        # c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size)
-
-        # output, _ = self.BLSTM2(output, (h0, c0))
-        output, _ = self.BLSTM2(output)
+        output, _ = self.BLSTM2(x)
 
         return output
 
@@ -82,21 +71,21 @@ def pyramid_stack(inputs):
 
 
 class PredictionNet(nn.Module):
-    def __init__(self, labels_len, embedding_size=20, hidden_size=512, num_layers=2):
+    def __init__(self, vocab_size, embedding_size=256, hidden_size=512, num_layers=2):
         super(PredictionNet, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.embedding_size = embedding_size
-        self.embedding = nn.Embedding(labels_len, labels_len-1, padding_idx=1)
-        self.embedding_one_hot = nn.Linear(in_features=labels_len, out_features=embedding_size)
-        self.lstm = nn.LSTM(labels_len-1, hidden_size=hidden_size, num_layers=num_layers, batch_first=True)
+        self.embedding = nn.Embedding(vocab_size, embedding_size)
+        self.embedding_one_hot = nn.Linear(in_features=vocab_size, out_features=embedding_size)
+        self.lstm = nn.LSTM(embedding_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True)
 
     def forward(self, x, one_hot=False):
-        zero = torch.zeros((x.shape[0], 1), dtype=torch.long)
+        zero = torch.zeros((x.shape[0], 1), dtype=torch.long).cuda()
         x_mat = torch.cat((zero, x), dim=1)
 
         # select prediction networks input as one-hot vector or mapping number
-        if True == one_hot:
+        if one_hot is True:
             x_mat = self.embedding_one_hot(x_mat)
         else:
             x_mat = self.embedding(x_mat)
@@ -106,60 +95,36 @@ class PredictionNet(nn.Module):
 
 
 class JointNetwork(nn.Module):
-    def __init__(self, num_classes, batch_size=20, hidden_nodes=2):
+    def __init__(self, vocab_size):
         super(JointNetwork, self).__init__()
-        self.batch_size = batch_size
-        self.hidden_nodes = hidden_nodes
-        self.num_classes = num_classes
+        self.vocab_size = vocab_size
 
-        # reshape to "N x T x U x H"
-        self.N = batch_size
-        self.T = 76
-        self.U = 50
-        self.H = self.hidden_nodes
-        self.output_feature = self.T * self.U * self.H
-
-        self.linear_enc = nn.Linear(in_features=512, out_features=self.output_feature)
-        self.linear_pred = nn.Linear(in_features=512, out_features=self.output_feature)
-        self.linear_feed_forward = nn.Linear(in_features=self.output_feature, out_features=num_classes*11)
+        self.linear_enc = nn.Linear(in_features=512, out_features=512)
+        self.linear_pred = nn.Linear(in_features=512, out_features=512)
+        self.linear_feed_forward = nn.Linear(512, vocab_size+1)
         self.tanH = nn.Tanh()
-
         self.loss = RNNTLoss()
-
-        self.fc1 = nn.Linear(hidden_nodes, hidden_nodes)
-        self.fc2 = nn.Linear(7600, num_classes)
 
     def forward(self, encoder_output, prediction_output, xs, xlen, ys, ylen):
         encoder_output = torch.unsqueeze(encoder_output, dim=2)
         prediction_output = torch.unsqueeze(prediction_output, dim=1)
-        # encoder_output = encoder_output.reshape(self.batch_size, -1)
-        # prediction_output = prediction_output.reshape(self.batch_size, -1)
 
         encoder_output = self.linear_enc(encoder_output)
         prediction_output = self.linear_pred(prediction_output)
 
-        # encoder_output = encoder_output.view(self.N, self.T, self.U, self.H)
-        # prediction_output = prediction_output.view(self.N, self.T, self.U, self.H)
-
         output = encoder_output + prediction_output
-        output = self.fc2(output)
+        output = self.linear_feed_forward(output)
         output = self.tanH(output)
-
         output = F.log_softmax(output, dim=3)
 
         xlen_temp = [i.shape[0] for i in output]
         xlen = torch.LongTensor(xlen_temp)
 
-        ys = ys.type(torch.int32)
-        xlen = xlen.type(torch.int32)
-        ylen = ylen.type(torch.int32)
+        ys = ys.type(torch.int32).cuda()
+        xlen = xlen.type(torch.int32).cuda()
+        ylen = ylen.type(torch.int32).cuda()
+
         loss = self.loss(output, ys, xlen, ylen)
-        """
-        acts: Tensor of (batch x seqLength x labelLength x outputDim) containing output from network
-        labels: 2 dimensional Tensor containing all the targets of the batch with zero padded
-        act_lens: Tensor of size (batch) containing size of each output sequence from the network
-        label_lens: Tensor of (batch) containing label length of each example
-        """
 
         return loss
 
