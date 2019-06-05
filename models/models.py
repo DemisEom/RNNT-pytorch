@@ -2,7 +2,6 @@ import torch
 import torch.autograd
 import torch.nn as nn
 import torch.nn.functional as F
-# from models.transducer_np import RNNTLoss
 from warprnnt_pytorch import RNNTLoss
 
 

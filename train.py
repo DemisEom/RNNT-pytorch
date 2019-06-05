@@ -25,7 +25,7 @@ parser.add_argument('--window-size', default=.02, type=float, help='Window size 
 parser.add_argument('--window-stride', default=.01, type=float, help='Window stride for spectrogram in seconds')
 parser.add_argument('--window', default='hamming', help='Window type for spectrogram generation')
 parser.add_argument('--activation-fn', default='relu', help='Specifies the activation function')
-parser.add_argument('--epochs', default=100, type=int, help='Number of training epochs')
+parser.add_argument('--epochs', default=200, type=int, help='Number of training epochs')
 parser.add_argument('--cuda', dest='cuda', action='store_true', help='Use cuda to train model')
 parser.add_argument('--lr', '--learning-rate', default=1e-4, type=float, help='initial learning rate')
 parser.add_argument('--lr-policy', default='poly', help='Set the policy for learning-rate')
@@ -211,11 +211,13 @@ if __name__ == '__main__':
             encoder_output = encoder_output.to(device)
             prediction_network_output = prediction_network_output.to(device)
 
-            loss = joint_network_model(encoder_output, prediction_network_output,
+            loss, _ = joint_network_model(encoder_output, prediction_network_output,
                                        inputs, input_sizes, targets_list, target_sizes)
 
             # Loss setting
             # Backward and optimize
+            # optimizer_1.zero_grad()
+            # optimizer_2.zero_grad()
             optimizer.zero_grad()
 
             loss.backward()
@@ -235,21 +237,21 @@ if __name__ == '__main__':
             #     print('[Epoch %d Batch %d] loss %.2f' %(step, i, temp_losses))
             #     total_loss = 0
 
-        temp_losses = total_loss / args.batch_size
-        print('[Epoch %d ] loss %.2f' % (step, temp_losses))
+        losses = sum(losses) / len(train_loader)
         total_loss = 0
 
-        eval_utils.eval_dev(encoder_model, prediction_network_model, joint_network_model, test_loader)
-
-        if args.tensorboard:
-            values = {
-                'Avg Train Loss': temp_losses
-            }
-            tensorboard_writer.add_scalars(args.id, values, step + 1)
-            for tag, value in joint_network_model.named_parameters():
-                tag = tag.replace('.', '/')
-                tensorboard_writer.add_histogram(tag, to_np(value), step + 1)
-                tensorboard_writer.add_histogram(tag + '/grad', to_np(value.grad), step + 1)
+        ## TO DO eval using metric WER, CER
+        loss_eval = eval_utils.eval_dev(encoder_model, prediction_network_model, joint_network_model, test_loader)
+        print('[Epoch %d ] loss %.2f, eval loss %2.f' % (step, losses, loss_eval))
+        # if args.tensorboard:
+        #     values = {
+        #         'Avg Train Loss': temp_losses
+        #     }
+        #     tensorboard_writer.add_scalars(args.id, values, step + 1)
+        #     for tag, value in joint_network_model.named_parameters():
+        #         tag = tag.replace('.', '/')
+        #         tensorboard_writer.add_histogram(tag, to_np(value), step + 1)
+        #         tensorboard_writer.add_histogram(tag + '/grad', to_np(value.grad), step + 1)
 
 
 

@@ -22,15 +22,8 @@ parser.add_argument('--max-duration', default=15, type=int,
 args = parser.parse_args()
 
 LIBRI_SPEECH_URLS = {
-    "train": ["http://www.openslr.org/resources/12/train-clean-100.tar.gz",
-              "http://www.openslr.org/resources/12/train-clean-360.tar.gz",
-              "http://www.openslr.org/resources/12/train-other-500.tar.gz"],
-
-    "val": ["http://www.openslr.org/resources/12/dev-clean.tar.gz",
-            "http://www.openslr.org/resources/12/dev-other.tar.gz"],
-
-    "test_clean": ["http://www.openslr.org/resources/12/test-clean.tar.gz"],
-    "test_other": ["http://www.openslr.org/resources/12/test-other.tar.gz"]
+    "train": [
+              "http://www.openslr.org/resources/12/train-other-500.tar.gz"]
 }
 
 

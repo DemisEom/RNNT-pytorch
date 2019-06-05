@@ -189,7 +189,7 @@ class NoiseInjection(object):
 
 
 class SpectrogramParser(AudioParser):
-    def __init__(self, audio_conf, normalize=False, augment=False, specaugment=False):
+    def __init__(self, audio_conf, normalize=False, augment=False, specaugment=False, mel_filterbank=False):
         """
         Parses audio file into spectrogram with optional normalization and various augmentations
         :param audio_conf: Dictionary containing the sample rate, window and the window length/stride in seconds
@@ -208,6 +208,7 @@ class SpectrogramParser(AudioParser):
             'noise_dir') is not None else None
         self.noise_prob = audio_conf.get('noise_prob')
         self.specaugment = specaugment
+        self.mel_filterbank = mel_filterbank
 
     def parse_audio(self, audio_path):
         if self.augment:
@@ -221,13 +222,17 @@ class SpectrogramParser(AudioParser):
         n_fft = int(self.sample_rate * self.window_size)
         win_length = n_fft
         hop_length = int(self.sample_rate * self.window_stride)
-        # STFT
-        D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length,
-                        win_length=win_length, window=self.window)
-        spect, phase = librosa.magphase(D)
-        # S = log(S+1)
-        spect = np.log1p(spect)
-        spect = torch.FloatTensor(spect)
+        if self.mel_filterbank is True :
+            librosa.filters.mel(sr=self.sample_rate, n_fft=n_fft,
+                                nmels=128)
+        else:
+            # STFT
+            D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length,
+                            win_length=win_length, window=self.window)
+            spect, phase = librosa.magphase(D)
+            # S = log(S+1)
+            spect = np.log1p(spect)
+            spect = torch.FloatTensor(spect)
 
         if self.specaugment:
             spect = time_mask(freq_mask(time_warp(spect), num_masks=2), num_masks=2)
