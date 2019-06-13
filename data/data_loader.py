@@ -62,7 +62,7 @@ def end_pad_label(inputs):
     max_t = max(len(i) for i in inputs)
     # max_t = 50
     shape = (len(inputs), max_t)
-    labels = np.full(shape, fill_value=0, dtype='i')
+    labels = np.full(shape, fill_value=26, dtype='i')
     for e, l in enumerate(inputs):
         labels[e, :len(l)] = l
 

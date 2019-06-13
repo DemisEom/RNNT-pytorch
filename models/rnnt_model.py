@@ -76,9 +76,9 @@ class PredictionNet(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.embedding_size = embedding_size
-        self.embedding = nn.Embedding(vocab_size, embedding_size)
+        self.embedding = nn.Embedding(vocab_size, vocab_size-1)
         self.embedding_one_hot = nn.Linear(in_features=vocab_size, out_features=embedding_size)
-        self.lstm = nn.LSTM(embedding_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True)
+        self.lstm = nn.LSTM(vocab_size-1, hidden_size=hidden_size, num_layers=num_layers, batch_first=True, dropout=0.3)
 
     def forward(self, x, one_hot=False):
         zero = torch.zeros((x.shape[0], 1), dtype=torch.long).cuda()
@@ -95,13 +95,13 @@ class PredictionNet(nn.Module):
 
 
 class JointNetwork(nn.Module):
-    def __init__(self, vocab_size):
+    def __init__(self, hidden_size, vocab_size):
         super(JointNetwork, self).__init__()
         self.vocab_size = vocab_size
 
-        self.linear_enc = nn.Linear(in_features=256, out_features=256)
-        self.linear_pred = nn.Linear(in_features=256, out_features=256)
-        self.linear_feed_forward = nn.Linear(in_features=256, out_features=vocab_size+1)
+        self.linear_enc = nn.Linear(in_features=hidden_size, out_features=hidden_size)
+        self.linear_pred = nn.Linear(in_features=hidden_size, out_features=hidden_size)
+        self.linear_feed_forward = nn.Linear(in_features=hidden_size*2, out_features=vocab_size)
         self.tanH = nn.Tanh()
         self.loss = RNNTLoss()
 
@@ -109,14 +109,23 @@ class JointNetwork(nn.Module):
         encoder_output = torch.unsqueeze(encoder_output, dim=2)
         prediction_output = torch.unsqueeze(prediction_output, dim=1)
 
+        ##
+        sz = [max(i, j) for i, j in zip(encoder_output.size()[:-1], prediction_output.size()[:-1])]
+        encoder_output = encoder_output.expand(torch.Size(sz+[encoder_output.shape[-1]]));
+        prediction_output = prediction_output.expand(torch.Size(sz+[prediction_output.shape[-1]]))
+        ##
+
         encoder_output = self.linear_enc(encoder_output)
         prediction_output = self.linear_pred(prediction_output)
 
         # output size is '[batch, time_length, word_length, feature_length]'
-        output = encoder_output + prediction_output
+        dim = len(encoder_output.shape) - 1
+        output = torch.cat((encoder_output, prediction_output), dim=dim)
+
+        # output = encoder_output + prediction_output
         output = self.linear_feed_forward(output)
-        output = self.tanH(output)
-        output = F.log_softmax(output, dim=3)
+        # output = self.tanH(output)
+        # output = F.log_softmax(output, dim=3)
 
         xlen_temp = [i.shape[0] for i in output]
         xlen = torch.LongTensor(xlen_temp)

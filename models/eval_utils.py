@@ -65,6 +65,7 @@ def eval_dev(encoder_model,
         targets_list = targets_list.cuda()
 
         encoder_output = encoder_model(inputs)
+        test = encoder_model(inputs)[0][0]
         prediction_network_output = prediction_network_model(targets_list, one_hot=False)
 
         encoder_output = encoder_output.cuda()
@@ -73,8 +74,8 @@ def eval_dev(encoder_model,
         loss, output = joint_network_model(encoder_output, prediction_network_output,
                                    inputs, input_sizes, targets_list, target_sizes)
 
-        preds = inference(inputs=inputs, targets_list=targets_list,
-                          target_sizes=target_sizes, output=output)
+        preds, test_1, test_2 = inference(inputs=inputs, targets_list=targets_list,
+                          target_sizes=target_sizes, output=output, labels_map=labels_map)
         losses.append(loss.data[0])
         all_preds.extend(preds)
 
@@ -84,6 +85,8 @@ def eval_dev(encoder_model,
             all_labels.append(temp_list[:temp_size])
 
     loss = sum(losses) / len(losses)
+    print(all_preds)
+    print(all_labels)
     # results = [(preproc.decode(l), preproc.decode(p))
     #            for l, p in zip(all_labels, all_preds)]
     # cer = speech.compute_cer(results)
@@ -91,7 +94,52 @@ def eval_dev(encoder_model,
     return loss
 
 
-def inference(inputs, targets_list, target_sizes, output, beam_size=4):
+def eval_dev_greedy(encoder_model, prediction_network_model, joint_network_model, test_loader):
+
+    losses = []
+    all_preds = []
+    all_labels = []
+
+    for i, (data) in enumerate(test_loader):
+        inputs, targets, input_percentages, target_sizes, _, targets_list, labels_map = data
+
+
+        input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
+
+        inputs = inputs.cuda()
+        targets_list = targets_list.cuda()
+
+        encoder_output = encoder_model(inputs)
+        prediction_network_output = prediction_network_model(targets_list, one_hot=False)
+
+        encoder_output = encoder_output.cuda()
+        prediction_network_output = prediction_network_output.cuda()
+
+        loss, output = joint_network_model(encoder_output, prediction_network_output,
+                                   inputs, input_sizes, targets_list, target_sizes)
+
+        preds, test_1, test_2 = inference(inputs=inputs, targets_list=targets_list,
+                          target_sizes=target_sizes, output=output, labels_map=labels_map)
+        losses.append(loss.data[0])
+        all_preds.extend(preds)
+
+        for i in range(len(target_sizes)):
+            temp_size = target_sizes[i].tolist()
+            temp_list = targets_list[i].tolist()
+            all_labels.append(temp_list[:temp_size])
+
+    loss = sum(losses) / len(losses)
+    print(all_preds)
+    print(all_labels)
+    # results = [(preproc.decode(l), preproc.decode(p))
+    #            for l, p in zip(all_labels, all_preds)]
+    # cer = speech.compute_cer(results)
+    # print("Dev: Loss {:.3f}, CER {:.3f}".format(loss, cer))
+    return loss
+
+
+
+def inference(inputs, targets_list, target_sizes, output, labels_map, beam_size=4):
     preds = []
 
     xlen_temp = [i.shape[0] for i in output]
@@ -101,8 +149,9 @@ def inference(inputs, targets_list, target_sizes, output, beam_size=4):
         T = xlen[i]
         U = target_sizes[i]+1
         lp = output[i, :T, :U, :]
-        preds.append(decode_static(lp, beam_size)[0])
-    return preds
+        test, test_2 = decode_static(lp, beam_size, blank=len(labels_map))
+        preds.append(test)
+    return preds, test, test_2
 
 
 def decode_static(log_probs, beam_size=1, blank=28):
@@ -141,6 +190,19 @@ def decode_static(log_probs, beam_size=1, blank=28):
 # Hawk Aron
 ##################################
 
+def inference_2(inputs, targets_list, target_sizes, output, labels_map, beam_size=4):
+    preds = []
+
+    xlen_temp = [i.shape[0] for i in output]
+    xlen = torch.LongTensor(xlen_temp)
+
+    for i in range(inputs.shape[0]):
+        T = xlen[i]
+        U = target_sizes[i]+1
+        lp = output[i, :T, :U, :]
+        test, test_2 = decode_static(lp, beam_size, blank=len(labels_map))
+        preds.append(test)
+    return preds, test, test_2
 
 def greedy_decode(self, x):
     x = self.encoder(x)[0][0]

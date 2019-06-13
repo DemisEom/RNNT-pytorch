@@ -1,4 +1,5 @@
 import models.rnnt_model as models
+from models.models import Transducer
 from data.data_loader import AudioDataLoader, SpectrogramDataset, BucketingSampler, DistributedBucketingSampler
 
 import argparse
@@ -17,25 +18,16 @@ parser.add_argument('--train-manifest', metavar='DIR',
 parser.add_argument('--val-manifest', metavar='DIR',
                     help='path to validation manifest csv', default='data/val_manifest.csv')
 parser.add_argument('--sample-rate', default=16000, type=int, help='Sample rate')
-parser.add_argument('--batch-size', default=5, type=int, help='Batch size for training')
+parser.add_argument('--batch-size', default=10, type=int, help='Batch size for training')
 parser.add_argument('--dropout', default=0.5, type=float, help='Dropout size for training')
 parser.add_argument('--num-workers', default=4, type=int, help='Number of workers used in data-loading')
-parser.add_argument('--labels-path', default='labels.json', help='Contains all characters for transcription')
+parser.add_argument('--labels-path', default='labels_eng.json', help='Contains all characters for transcription')
 parser.add_argument('--window-size', default=.02, type=float, help='Window size for spectrogram in seconds')
 parser.add_argument('--window-stride', default=.01, type=float, help='Window stride for spectrogram in seconds')
 parser.add_argument('--window', default='hamming', help='Window type for spectrogram generation')
-parser.add_argument('--activation-fn', default='relu', help='Specifies the activation function')
-parser.add_argument('--epochs', default=200, type=int, help='Number of training epochs')
+parser.add_argument('--epochs', default=300, type=int, help='Number of training epochs')
 parser.add_argument('--cuda', dest='cuda', action='store_true', help='Use cuda to train model')
-parser.add_argument('--lr', '--learning-rate', default=1e-4, type=float, help='initial learning rate')
-parser.add_argument('--lr-policy', default='poly', help='Set the policy for learning-rate')
-parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
-parser.add_argument('--max-norm', default=400, type=int, help='Norm cutoff to prevent explosion of gradients')
-parser.add_argument('--learning-anneal', default=0.5, type=float, help='Annealing applied to learning rate every epoch')
-parser.add_argument('--silent', dest='silent', action='store_true', help='Turn off progress tracking per iteration')
-parser.add_argument('--checkpoint', dest='checkpoint', action='store_true', help='Enables checkpoint saving of model')
-parser.add_argument('--checkpoint-per-batch', default=0, type=int, help='Save checkpoint per batch. 0 means never save')
-parser.add_argument('--checkpoint-overwrite', dest='checkpoint_overwrite', action='store_true', help='Overwrite checkpoints')
+parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float, help='initial learning rate')
 parser.add_argument('--tensorboard',default=True, help='Turn on tensorboard graphing')
 parser.add_argument('--log-dir', default='logs/', help='Location of tensorboard log')
 parser.add_argument('--id', default='RNNT training', help='Identifier for tensorboard run')
@@ -98,13 +90,13 @@ if __name__ == '__main__':
     loss_results, cer_results, wer_results = torch.Tensor(args.epochs), torch.Tensor(args.epochs), torch.Tensor(args.epochs)
     best_wer = None
 
-    # visualization setting
-    if args.tensorboard:
-        print("visualizing by tensorboard")
-        os.makedirs(args.log_dir, exist_ok=True)
-        from tensorboardX import SummaryWriter
-        tensorboard_writer = SummaryWriter(args.log_dir)
-    os.makedirs(save_folder, exist_ok=True)
+    ## visualization setting
+    # if args.tensorboard:
+    #     print("visualizing by tensorboard")
+    #     os.makedirs(args.log_dir, exist_ok=True)
+    #     from tensorboardX import SummaryWriter
+    #     tensorboard_writer = SummaryWriter(args.log_dir)
+    # os.makedirs(save_folder, exist_ok=True)
 
     save_folder = args.save_folder
 
@@ -154,34 +146,34 @@ if __name__ == '__main__':
 
     train_loader = AudioDataLoader(train_dataset,
                                    num_workers=args.num_workers, batch_sampler=train_sampler)
-    test_loader = AudioDataLoader(test_dataset, batch_size=args.batch_size,
-                                  num_workers=args.num_workers)
+    test_loader = AudioDataLoader(test_dataset, batch_size=args.batch_size, num_workers=args.num_workers)
 
     # ==========================================
     # NETWORK SETTING
     # ==========================================
     # load model
-    encoder_model = models.Encoder(audio_conf=audio_conf).to(device)
-    print(encoder_model)
+    test_model = Transducer(161, 62, len(labels), 3, args.dropout, bidirectional=True).to(device)
+    test_optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, test_model.parameters()), lr=args.lr, momentum=.9)
 
-    prediction_network_model = models.PredictionNet(vocab_size=len(labels)).to(device)
-    print(prediction_network_model)
-
-    joint_network_model = models.JointNetwork(vocab_size=len(labels)).to(device)
-    print(joint_network_model)
-
-    if args.distributed:
-        encoder_model = torch.nn.parallel.DistributedDataParallel(encoder_model,
-                                                                  device_ids=(int(args.gpu_rank),) if args.gpu_rank else None)
-        prediction_network_model = torch.nn.parallel.DistributedDataParallel(prediction_network_model,
-                                                                             device_ids=(int(args.gpu_rank),) if args.gpu_rank else None)
-        joint_network_model = torch.nn.parallel.DistributedDataParallel(joint_network_model,
-                                                                        device_ids=(int(args.gpu_rank),) if args.gpu_rank else None)
-
-    # Loss and optimizer
-    # optimizer_1 = torch.optim.Adam(encoder_model.parameters(), lr=args.lr)
-    # optimizer_2 = torch.optim.Adam(prediction_network_model.parameters(), lr=args.lr)
-    optimizer = torch.optim.Adam(joint_network_model.parameters(), lr=args.lr)
+    # encoder_model = models.Encoder(hidden_size=64, audio_conf=audio_conf).to(device)
+    # print(encoder_model)
+    #
+    # prediction_network_model = models.PredictionNet(hidden_size=128, vocab_size=len(labels)).to(device)
+    # print(prediction_network_model)
+    #
+    # joint_network_model = models.JointNetwork(hidden_size=128, vocab_size=len(labels)).to(device)
+    # print(joint_network_model)
+    #
+    # if args.distributed:
+    #     encoder_model = torch.nn.parallel.DistributedDataParallel(encoder_model,
+    #                                                               device_ids=(int(args.gpu_rank),) if args.gpu_rank else None)
+    #     prediction_network_model = torch.nn.parallel.DistributedDataParallel(prediction_network_model,
+    #                                                                          device_ids=(int(args.gpu_rank),) if args.gpu_rank else None)
+    #     joint_network_model = torch.nn.parallel.DistributedDataParallel(joint_network_model,
+    #                                                                     device_ids=(int(args.gpu_rank),) if args.gpu_rank else None)
+    #
+    # # Loss and optimizer
+    # optimizer = torch.optim.Adam(joint_network_model.parameters(), lr=args.lr)
 
     # ==========================================
     # TRAINING
@@ -189,7 +181,7 @@ if __name__ == '__main__':
     for step in range(args.epochs):
 
         total_loss = 0
-        totloss = 0; losses = []
+        totloss = 0; losses = []; test_losses=[];
         start_time = time.time()
 
         for i, (data) in enumerate(train_loader):
@@ -201,57 +193,85 @@ if __name__ == '__main__':
 
             input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
 
+            if inputs.shape[0] == 1:
+                break
+
             inputs = inputs.to(device)
             targets_list = targets_list.to(device)
 
             # Forward pass
-            encoder_output = encoder_model(inputs)
-            prediction_network_output = prediction_network_model(targets_list, one_hot=False)
+            # encoder_output = encoder_model(inputs)
+            # prediction_network_output = prediction_network_model(targets_list, one_hot=False)
+            #
+            # encoder_output = encoder_output.to(device)
+            # prediction_network_output = prediction_network_output.to(device)
+            #
+            # loss, _ = joint_network_model(encoder_output, prediction_network_output,
+            #                            inputs, input_sizes, targets_list, target_sizes)
+            #
+            # optimizer.zero_grad()
+            # loss.backward()
+            #
+            # loss = float(loss.data) * len(input_sizes)
+            # total_loss += loss
+            # losses.append(loss)
 
-            encoder_output = encoder_output.to(device)
-            prediction_network_output = prediction_network_output.to(device)
-
-            loss, _ = joint_network_model(encoder_output, prediction_network_output,
-                                       inputs, input_sizes, targets_list, target_sizes)
-
-            # Loss setting
-            # Backward and optimize
-            # optimizer_1.zero_grad()
-            # optimizer_2.zero_grad()
-            optimizer.zero_grad()
-
-            loss.backward()
-
-            loss = float(loss.data) * len(input_sizes)
-            total_loss += loss
-            losses.append(loss)
+            ### test
+            test_model.train()
+            test_optimizer.zero_grad()
+            test_loss = test_model(inputs, targets_list, input_sizes, target_sizes)
+            test_loss.backward()
+            test_optimizer.step()
+            test_losses.append(test_loss)
+            #######
 
             # grad_norm = nn.utils.clip_grad_norm(joint_network_model.parameters(), 200)
+            # optimizer.step()
 
-            # optimizer_1.step()
-            # optimizer_2.step()
-            optimizer.step()
 
-            # if i % 10 == 0 and i > 0:
-            #     temp_losses = total_loss / 20
-            #     print('[Epoch %d Batch %d] loss %.2f' %(step, i, temp_losses))
-            #     total_loss = 0
+            if i % 10 == 0 and i > 0:
+                temp_losses = total_loss / 10
+                # print('[Epoch %d Batch %d] loss %.2f' %(step, i, temp_losses))
+                total_loss = 0
+
+        eval_losses =[]
+
+        for i, (data) in enumerate(test_loader):
+
+            inputs, targets, input_percentages, target_sizes, targets_one_hot, targets_list, labels_map = data
+
+            input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
+
+            if inputs.shape[0] == 1:
+                break
+
+            inputs = inputs.to(device)
+            targets_list = targets_list.to(device)
+
+            eval_loss = test_model(inputs, targets_list, input_sizes, target_sizes)
+
+            inverse_map = dict((v, k) for k, v in labels_map.items())
+
+            # y, nll = test_model.beam_search(inputs, labels_map=labels_map)
+            y, nll = test_model.greedy_decode(inputs)
+            y_mapped = [inverse_map[i] for i in y]
+            print("===========inference & RAW =============")
+            print(y_mapped)
+            targets_list = targets_list.tolist()
+            # for i in range(len(targets_list)):
+            #     print([inverse_map[j] for j in targets_list[i]])
+            print([inverse_map[j] for j in targets_list[1]])
+            eval_losses.append(eval_loss)
 
         losses = sum(losses) / len(train_loader)
+        test_losses = sum(test_losses) / len(train_loader)
+        eval_losses = sum(eval_losses) / len(test_loader)
         total_loss = 0
 
+        print('[Epoch %d ] loss %.2f, eval loss %2.f' %(step, test_losses, eval_losses))
+
+        if step % 50 == 0:
+            temp_model_name = "logs/" + str(step) + "_an4_rnnt_model.pt"
+            torch.save(test_model, temp_model_name)
+
         ## TO DO eval using metric WER, CER
-        loss_eval = eval_utils.eval_dev(encoder_model, prediction_network_model, joint_network_model, test_loader)
-        print('[Epoch %d ] loss %.2f, eval loss %2.f' % (step, losses, loss_eval))
-        # if args.tensorboard:
-        #     values = {
-        #         'Avg Train Loss': temp_losses
-        #     }
-        #     tensorboard_writer.add_scalars(args.id, values, step + 1)
-        #     for tag, value in joint_network_model.named_parameters():
-        #         tag = tag.replace('.', '/')
-        #         tensorboard_writer.add_histogram(tag, to_np(value), step + 1)
-        #         tensorboard_writer.add_histogram(tag + '/grad', to_np(value.grad), step + 1)
-
-
-
