@@ -1,7 +1,5 @@
-import models.rnnt_model as models
 from models.models import Transducer
 from data.data_loader import AudioDataLoader, SpectrogramDataset, BucketingSampler, DistributedBucketingSampler
-
 import argparse
 import json
 import os
@@ -20,12 +18,12 @@ parser.add_argument('--val-manifest', metavar='DIR',
 parser.add_argument('--sample-rate', default=16000, type=int, help='Sample rate')
 parser.add_argument('--batch-size', default=10, type=int, help='Batch size for training')
 parser.add_argument('--dropout', default=0.5, type=float, help='Dropout size for training')
-parser.add_argument('--num-workers', default=4, type=int, help='Number of workers used in data-loading')
+parser.add_argument('--num-workers', default=6, type=int, help='Number of workers used in data-loading')
 parser.add_argument('--labels-path', default='labels_eng.json', help='Contains all characters for transcription')
 parser.add_argument('--window-size', default=.02, type=float, help='Window size for spectrogram in seconds')
 parser.add_argument('--window-stride', default=.01, type=float, help='Window stride for spectrogram in seconds')
 parser.add_argument('--window', default='hamming', help='Window type for spectrogram generation')
-parser.add_argument('--epochs', default=300, type=int, help='Number of training epochs')
+parser.add_argument('--epochs', default=1000, type=int, help='Number of training epochs')
 parser.add_argument('--cuda', dest='cuda', action='store_true', help='Use cuda to train model')
 parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float, help='initial learning rate')
 parser.add_argument('--tensorboard',default=True, help='Turn on tensorboard graphing')
@@ -35,8 +33,6 @@ parser.add_argument('--save-folder', default='models/', help='Location to save e
 parser.add_argument('--model-path', default='models/RNNT_model.pth',
                     help='Location to save best validation model')
 parser.add_argument('--continue-from', default='', help='Continue from checkpoint model')
-parser.add_argument('--finetune', dest='finetune', action='store_true',
-                    help='Finetune the model from checkpoint "continue_from"')
 parser.add_argument('--augment', dest='augment', action='store_true', help='Use random tempo and gain perturbations.')
 parser.add_argument('--noise-dir', default=None,
                     help='Directory to inject noise into audio. If default, noise Inject not added')
@@ -52,8 +48,6 @@ parser.add_argument('--rank', default=0, type=int,
 parser.add_argument('--gpu-rank', default=None,
                     help='If using distributed parallel for multi-gpu, sets the GPU for the process')
 parser.add_argument('--spec-augment', dest='spec_augment', action='store_true', help='using SpecAugment')
-parser.add_argument('--prediction_one_hot', default=False,
-                    help='Directory to inject noise into audio. If default, noise Inject not added')
 
 # setting seed
 torch.manual_seed(72160258)
@@ -90,13 +84,13 @@ if __name__ == '__main__':
     loss_results, cer_results, wer_results = torch.Tensor(args.epochs), torch.Tensor(args.epochs), torch.Tensor(args.epochs)
     best_wer = None
 
-    ## visualization setting
-    # if args.tensorboard:
-    #     print("visualizing by tensorboard")
-    #     os.makedirs(args.log_dir, exist_ok=True)
-    #     from tensorboardX import SummaryWriter
-    #     tensorboard_writer = SummaryWriter(args.log_dir)
-    # os.makedirs(save_folder, exist_ok=True)
+    # visualization setting
+    if args.tensorboard:
+        print("visualizing by tensorboard")
+        os.makedirs(args.log_dir, exist_ok=True)
+        from tensorboardX import SummaryWriter
+        tensorboard_writer = SummaryWriter(args.log_dir)
+    os.makedirs(save_folder, exist_ok=True)
 
     save_folder = args.save_folder
 
@@ -117,7 +111,7 @@ if __name__ == '__main__':
             torch.cuda.set_device(int(args.gpu_rank))
 
     # ==========================================
-    # DATA
+    # DATA SET
     # ==========================================
 
     # setting dataset, data_loader
@@ -132,9 +126,8 @@ if __name__ == '__main__':
     with codecs.open(args.labels_path, 'r', encoding='utf-8') as label_file:
         labels = str(''.join(json.load(label_file)))
 
-
     train_dataset = SpectrogramDataset(audio_conf=audio_conf, manifest_filepath=args.train_manifest, labels=labels,
-                                       normalize=True, augment=args.augment, specaugment=False)
+                                       normalize=True, augment=False, specaugment=False)
     test_dataset = SpectrogramDataset(audio_conf=audio_conf, manifest_filepath=args.val_manifest, labels=labels,
                                       normalize=True, augment=False, specaugment=False)
 
@@ -152,29 +145,17 @@ if __name__ == '__main__':
     # NETWORK SETTING
     # ==========================================
     # load model
-    test_model = Transducer(161, 62, len(labels), 3, args.dropout, bidirectional=True).to(device)
-    test_optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, test_model.parameters()), lr=args.lr, momentum=.9)
+    test_model = Transducer(input_size=161,
+                            vocab_size=len(labels),
+                            hidden_size=128,
+                            num_layers=2,
+                            dropout=args.dropout,
+                            bidirectional=True).to(device)
 
-    # encoder_model = models.Encoder(hidden_size=64, audio_conf=audio_conf).to(device)
-    # print(encoder_model)
-    #
-    # prediction_network_model = models.PredictionNet(hidden_size=128, vocab_size=len(labels)).to(device)
-    # print(prediction_network_model)
-    #
-    # joint_network_model = models.JointNetwork(hidden_size=128, vocab_size=len(labels)).to(device)
-    # print(joint_network_model)
-    #
-    # if args.distributed:
-    #     encoder_model = torch.nn.parallel.DistributedDataParallel(encoder_model,
-    #                                                               device_ids=(int(args.gpu_rank),) if args.gpu_rank else None)
-    #     prediction_network_model = torch.nn.parallel.DistributedDataParallel(prediction_network_model,
-    #                                                                          device_ids=(int(args.gpu_rank),) if args.gpu_rank else None)
-    #     joint_network_model = torch.nn.parallel.DistributedDataParallel(joint_network_model,
-    #                                                                     device_ids=(int(args.gpu_rank),) if args.gpu_rank else None)
-    #
-    # # Loss and optimizer
-    # optimizer = torch.optim.Adam(joint_network_model.parameters(), lr=args.lr)
-
+    test_optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, test_model.parameters()),
+                                     lr=args.lr, momentum=.9)
+    # test_optimizer = torch.optim.Adam()
+    print(test_model)
     # ==========================================
     # TRAINING
     # ==========================================
@@ -199,35 +180,12 @@ if __name__ == '__main__':
             inputs = inputs.to(device)
             targets_list = targets_list.to(device)
 
-            # Forward pass
-            # encoder_output = encoder_model(inputs)
-            # prediction_network_output = prediction_network_model(targets_list, one_hot=False)
-            #
-            # encoder_output = encoder_output.to(device)
-            # prediction_network_output = prediction_network_output.to(device)
-            #
-            # loss, _ = joint_network_model(encoder_output, prediction_network_output,
-            #                            inputs, input_sizes, targets_list, target_sizes)
-            #
-            # optimizer.zero_grad()
-            # loss.backward()
-            #
-            # loss = float(loss.data) * len(input_sizes)
-            # total_loss += loss
-            # losses.append(loss)
-
-            ### test
             test_model.train()
             test_optimizer.zero_grad()
             test_loss = test_model(inputs, targets_list, input_sizes, target_sizes)
             test_loss.backward()
             test_optimizer.step()
             test_losses.append(test_loss)
-            #######
-
-            # grad_norm = nn.utils.clip_grad_norm(joint_network_model.parameters(), 200)
-            # optimizer.step()
-
 
             if i % 10 == 0 and i > 0:
                 temp_losses = total_loss / 10
@@ -235,6 +193,10 @@ if __name__ == '__main__':
                 total_loss = 0
 
         eval_losses =[]
+
+        # ==========================================
+        # EVALUATION
+        # ==========================================
 
         for i, (data) in enumerate(test_loader):
 
@@ -263,6 +225,9 @@ if __name__ == '__main__':
             print([inverse_map[j] for j in targets_list[1]])
             eval_losses.append(eval_loss)
 
+            ## TO DO eval using metric WER, CER
+            # eval_utils.compute_cer()
+
         losses = sum(losses) / len(train_loader)
         test_losses = sum(test_losses) / len(train_loader)
         eval_losses = sum(eval_losses) / len(test_loader)
@@ -273,5 +238,3 @@ if __name__ == '__main__':
         if step % 50 == 0:
             temp_model_name = "logs/" + str(step) + "_an4_rnnt_model.pt"
             torch.save(test_model, temp_model_name)
-
-        ## TO DO eval using metric WER, CER

@@ -1,26 +1,85 @@
-import copy
-import numpy as np
+import math
 import torch
 from torch import nn, autograd
 import torch.nn.functional as F
 from warprnnt_pytorch import RNNTLoss
 
-class RNNModel(nn.Module):
-    def __init__(self, input_size, vocab_size, hidden_size, num_layers, dropout=.2, blank=0, bidirectional=False):
-        super(RNNModel, self).__init__()
+
+class DecoderModel(nn.Module):
+    def __init__(self, embed_size, vocab_size, hidden_size, num_layers, dropout=.2, blank=0, bidirectional=False):
+        super(DecoderModel, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.vocab_size = vocab_size
         self.blank = blank
-        # lstm hidden vector: (h_0, c_0) num_layers * num_directions, batch, hidden_size
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout, bidirectional=bidirectional)
-        if bidirectional: hidden_size *= 2
+        self.embed_size = embed_size
+
+        self.embed = nn.Embedding(vocab_size, vocab_size - 1, padding_idx=blank)
+        self.embed.weight.data[1:] = torch.eye(vocab_size - 1)
+        self.embed.weight.requires_grad = False
+
+        self.decoder = nn.LSTM(vocab_size - 1, hidden_size, 1, batch_first=True, dropout=dropout)
+
+        self.lstm = nn.LSTM(input_size=vocab_size-1,
+                            hidden_size=hidden_size,
+                            num_layers=1,
+                            batch_first=True, dropout=dropout, bidirectional=bidirectional)
+
+        if bidirectional:
+            hidden_size *= 2
+
         self.linear = nn.Linear(hidden_size, vocab_size)
 
+    def forward(self, y_mat, hid=None):
+
+        y_mat = self.embed(y_mat)
+        y_mat, _ = self.lstm(y_mat)
+
+        out = y_mat.reshape(y_mat.size(0) * y_mat.size(1), y_mat.size(2))
+
+        out = self.linear(out)
+
+        return out, y_mat
+
+
+class EncoderModel(nn.Module):
+    def __init__(self, input_size, vocab_size, hidden_size, num_layers, dropout=.2, blank=0, bidirectional=False):
+        super(EncoderModel, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.vocab_size = vocab_size
+        self.blank = blank
+
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers,
+                            batch_first=True, dropout=dropout, bidirectional=bidirectional)
+        self.gru = nn.GRU(input_size=input_size,
+                          hidden_size=hidden_size,
+                          num_layers=num_layers,
+                          batch_first=True,
+                          dropout=dropout,
+                          bidirectional=bidirectional)
+
+        if bidirectional:
+            hidden_size *= 2
+
+        self.linear = nn.Linear(hidden_size, vocab_size)
+
+        self.conv_1 = nn.Conv2d(1, 1, (1, 1), stride=1)
+        self.conv_2 = nn.Conv2d(1, 1, (1, 1), stride=1)
+
     def forward(self, xs, hid=None):
+        xs = torch.transpose(xs, 2, 3)
+
+        xs = self.conv_1(xs)
+        xs = self.conv_2(xs)
+
         xs = xs.squeeze()
-        xs = torch.transpose(xs, 1, 2)
+
         h, hid = self.lstm(xs, hid)
+        # h, hid = self.gru(xs, hid)
+
+        # TO DO, ADD pyramidal BI-LSTM
+
         return self.linear(h), hid
 
     def greedy_decode(self, xs):
@@ -28,12 +87,6 @@ class RNNModel(nn.Module):
         xs = F.log_softmax(xs, dim=1)
         logp, pred = torch.max(xs, dim=1)
         return pred.data.cpu().numpy(), -float(logp.sum())
-
-    # def beam_search(self, xs, W):
-    #     ''' CTC '''
-    #     xs = self(xs)[0][0] # only one sequence
-    #     logp = F.log_softmax(xs, dim=1)
-    #     return ctc_beam(logp.data.cpu().numpy(), W)
 
 
 class Transducer(nn.Module):
@@ -44,12 +97,11 @@ class Transducer(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.loss = RNNTLoss()
-        # NOTE encoder & decoder only use lstm
-        self.encoder = RNNModel(input_size, hidden_size, hidden_size, num_layers, dropout, bidirectional=bidirectional)
+
+        self.encoder = EncoderModel(input_size, hidden_size, hidden_size, num_layers, dropout, bidirectional=bidirectional)
         self.embed = nn.Embedding(vocab_size, vocab_size - 1, padding_idx=blank)
         self.embed.weight.data[1:] = torch.eye(vocab_size - 1)
         self.embed.weight.requires_grad = False
-        # self.decoder = RNNModel(vocab_size-1, vocab_size, hidden_size, 1, dropout)
         self.decoder = nn.LSTM(vocab_size - 1, hidden_size, 1, batch_first=True, dropout=dropout)
         self.fc1 = nn.Linear(2 * hidden_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, vocab_size)
@@ -59,25 +111,36 @@ class Transducer(nn.Module):
         `g`: decoder lstm output (B,T,U,H)
         NOTE f and g must have the same size except the last dim'''
         dim = len(f.shape) - 1
+
         out = torch.cat((f, g), dim=dim)
         out = F.tanh(self.fc1(out))
+
         return self.fc2(out)
 
     def forward(self, xs, ys, xlen, ylen):
+        # encoder
         xs, _ = self.encoder(xs)
+
         # concat first zero
         zero = autograd.Variable(torch.zeros((ys.shape[0], 1)).long())
-        if ys.is_cuda: zero = zero.cuda()
+
+        if ys.is_cuda:
+            zero = zero.cuda()
+
         ymat = torch.cat((zero, ys), dim=1)
-        # forwoard pm
+
+        # decoder(prediction network)
         ymat = self.embed(ymat)
         ymat, _ = self.decoder(ymat)
+
         xs = xs.unsqueeze(dim=2)
         ymat = ymat.unsqueeze(dim=1)
+
         # expand
         sz = [max(i, j) for i, j in zip(xs.size()[:-1], ymat.size()[:-1])]
         xs = xs.expand(torch.Size(sz + [xs.shape[-1]]));
         ymat = ymat.expand(torch.Size(sz + [ymat.shape[-1]]))
+
         out = self.joint(xs, ymat)
         if ys.is_cuda:
             xlen = xlen.cuda()
@@ -199,7 +262,26 @@ class Transducer(nn.Module):
         return B[0].k, -B[0].logp
 
 
-import math
+def pyramid_stack(inputs):
+
+    size = inputs.size()
+
+    if int(size[1]) % 2 == 1:
+        padded_inputs = F.pad(inputs, (0, 0, 0, 1, 0, 0))
+        sequence_length = int(size[1]) + 1
+    else:
+        padded_inputs = inputs
+        sequence_length = int(size[1])
+
+    odd_ind = torch.arange(1, sequence_length, 2, dtype=torch.long)
+    even_ind = torch.arange(0, sequence_length, 2, dtype=torch.long)
+
+    odd_inputs = padded_inputs[:, odd_ind, :]
+    even_inputs = padded_inputs[:, even_ind, :]
+
+    outputs_stacked = torch.cat([even_inputs, odd_inputs], 2)
+
+    return outputs_stacked
 
 
 def log_aplusb(a, b):
