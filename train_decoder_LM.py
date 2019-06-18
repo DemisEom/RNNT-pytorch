@@ -109,10 +109,11 @@ if __name__ == '__main__':
     # DATA SET
     # ==========================================
 
-    embed_size = 128
-    hidden_size = 1024
-    num_layers = 1
-    num_epochs = 5
+    embed_size = 26
+    hidden_size = 150
+    num_layers = 2
+    num_epochs = 50
+    batch_size = args.batch_size
     num_samples = 1000  # number of words to be sampled
     seq_length = 30
 
@@ -131,7 +132,8 @@ if __name__ == '__main__':
     model = DecoderModel(embed_size=embed_size,
                          vocab_size=vocab_size,
                          hidden_size=hidden_size,
-                         num_layers=num_layers).to(device)
+                         num_layers=num_layers,
+                         LM=True).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     print(model)
@@ -152,7 +154,7 @@ if __name__ == '__main__':
 
             # Forward pass
             states = detach(states)
-            outputs, states = model(inputs)
+            outputs, y_mat, states = model(inputs)
             loss = criterion(outputs, targets.reshape(-1))
 
             # Backward and optimize
@@ -179,7 +181,7 @@ if __name__ == '__main__':
 
             for i in range(num_samples):
                 # Forward propagate RNN
-                output, state = model(input, state)
+                output, y_mat, state = model(input, state)
 
                 # Sample a word id
                 prob = output.exp()

@@ -8,6 +8,7 @@ import codecs
 import torch.distributed as dist
 import torch.utils.data.distributed
 import models.eval_utils as eval_utils
+from logger import Logger
 
 # parameter setting
 parser = argparse.ArgumentParser(description='RNN-T training')
@@ -16,21 +17,21 @@ parser.add_argument('--train-manifest', metavar='DIR',
 parser.add_argument('--val-manifest', metavar='DIR',
                     help='path to validation manifest csv', default='data/val_manifest.csv')
 parser.add_argument('--sample-rate', default=16000, type=int, help='Sample rate')
-parser.add_argument('--batch-size', default=10, type=int, help='Batch size for training')
+parser.add_argument('--batch-size', default=2, type=int, help='Batch size for training')
 parser.add_argument('--dropout', default=0.5, type=float, help='Dropout size for training')
 parser.add_argument('--num-workers', default=6, type=int, help='Number of workers used in data-loading')
 parser.add_argument('--labels-path', default='labels_eng.json', help='Contains all characters for transcription')
 parser.add_argument('--window-size', default=.02, type=float, help='Window size for spectrogram in seconds')
 parser.add_argument('--window-stride', default=.01, type=float, help='Window stride for spectrogram in seconds')
 parser.add_argument('--window', default='hamming', help='Window type for spectrogram generation')
-parser.add_argument('--epochs', default=1000, type=int, help='Number of training epochs')
+parser.add_argument('--epochs', default=310, type=int, help='Number of training epochs')
 parser.add_argument('--cuda', dest='cuda', action='store_true', help='Use cuda to train model')
 parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float, help='initial learning rate')
 parser.add_argument('--tensorboard',default=True, help='Turn on tensorboard graphing')
 parser.add_argument('--log-dir', default='logs/', help='Location of tensorboard log')
 parser.add_argument('--id', default='RNNT training', help='Identifier for tensorboard run')
 parser.add_argument('--save-folder', default='models/', help='Location to save epoch models')
-parser.add_argument('--model-path', default='models/RNNT_model.pth',
+parser.add_argument('--model-path', default='models/250_an4_rnnt_model.pt',
                     help='Location to save best validation model')
 parser.add_argument('--continue-from', default='', help='Continue from checkpoint model')
 parser.add_argument('--augment', dest='augment', action='store_true', help='Use random tempo and gain perturbations.')
@@ -48,6 +49,8 @@ parser.add_argument('--rank', default=0, type=int,
 parser.add_argument('--gpu-rank', default=None,
                     help='If using distributed parallel for multi-gpu, sets the GPU for the process')
 parser.add_argument('--spec-augment', dest='spec_augment', action='store_true', help='using SpecAugment')
+parser.add_argument('--languagemodel',metavar='DIR',
+                    help='path to pretrained decoder pt model file', default=None)
 
 # setting seed
 torch.manual_seed(72160258)
@@ -86,10 +89,12 @@ if __name__ == '__main__':
 
     # visualization setting
     if args.tensorboard:
-        print("visualizing by tensorboard")
-        os.makedirs(args.log_dir, exist_ok=True)
-        from tensorboardX import SummaryWriter
-        tensorboard_writer = SummaryWriter(args.log_dir)
+        logger = Logger(args.log_dir)
+        # print("visualizing by tensorboard")
+        # os.makedirs(args.log_dir, exist_ok=True)
+        # from tensorboardX import SummaryWriter
+        # tensor_writer = SummaryWriter(args.log_dir)
+
     os.makedirs(save_folder, exist_ok=True)
 
     save_folder = args.save_folder
@@ -145,24 +150,30 @@ if __name__ == '__main__':
     # NETWORK SETTING
     # ==========================================
     # load model
-    test_model = Transducer(input_size=161,
+    model = Transducer(input_size=161,
                             vocab_size=len(labels),
-                            hidden_size=128,
+                            hidden_size=150,
                             num_layers=2,
                             dropout=args.dropout,
-                            bidirectional=True).to(device)
+                            bidirectional=True,
+                            decoder_load=False).to(device)
 
-    test_optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, test_model.parameters()),
+    # if args.model_path:
+    #     test = torch.load(args.model_path)
+    #     test_model.load_state_dict(torch.load(args.model_path))
+
+    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
                                      lr=args.lr, momentum=.9)
-    # test_optimizer = torch.optim.Adam()
-    print(test_model)
+    # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
+    #                                      lr=args.lr)
+    print(model)
     # ==========================================
     # TRAINING
     # ==========================================
     for step in range(args.epochs):
 
         total_loss = 0
-        totloss = 0; losses = []; test_losses=[];
+        train_losses = []
         start_time = time.time()
 
         for i, (data) in enumerate(train_loader):
@@ -180,16 +191,16 @@ if __name__ == '__main__':
             inputs = inputs.to(device)
             targets_list = targets_list.to(device)
 
-            test_model.train()
-            test_optimizer.zero_grad()
-            test_loss = test_model(inputs, targets_list, input_sizes, target_sizes)
-            test_loss.backward()
-            test_optimizer.step()
-            test_losses.append(test_loss)
+            model.train()
+            optimizer.zero_grad()
+            train_loss = model(inputs, targets_list, input_sizes, target_sizes)
+            train_loss.backward()
+            optimizer.step()
+            train_losses.append(train_loss)
 
-            if i % 10 == 0 and i > 0:
+            if i % 1000 == 0 and i > 0:
                 temp_losses = total_loss / 10
-                # print('[Epoch %d Batch %d] loss %.2f' %(step, i, temp_losses))
+                print('[Epoch %d Batch %d] loss %.2f' %(step, i, temp_losses))
                 total_loss = 0
 
         eval_losses =[]
@@ -197,6 +208,8 @@ if __name__ == '__main__':
         # ==========================================
         # EVALUATION
         # ==========================================
+        total_cer = []
+        total_wer = []
 
         for i, (data) in enumerate(test_loader):
 
@@ -210,31 +223,48 @@ if __name__ == '__main__':
             inputs = inputs.to(device)
             targets_list = targets_list.to(device)
 
-            eval_loss = test_model(inputs, targets_list, input_sizes, target_sizes)
+            eval_loss = model(inputs, targets_list, input_sizes, target_sizes)
 
             inverse_map = dict((v, k) for k, v in labels_map.items())
 
             # y, nll = test_model.beam_search(inputs, labels_map=labels_map)
-            y, nll = test_model.greedy_decode(inputs)
-            y_mapped = [inverse_map[i] for i in y]
+            y, nll = model.greedy_decode(inputs)
+            mapped_pred = [inverse_map[i] for i in y]
+
             print("===========inference & RAW =============")
-            print(y_mapped)
+            print(mapped_pred)
             targets_list = targets_list.tolist()
-            # for i in range(len(targets_list)):
-            #     print([inverse_map[j] for j in targets_list[i]])
-            print([inverse_map[j] for j in targets_list[1]])
+            mapped_target = [inverse_map[j] for j in targets_list[0]]
+            print(mapped_target)
             eval_losses.append(eval_loss)
 
-            ## TO DO eval using metric WER, CER
-            # eval_utils.compute_cer()
+            # eval using metric WER, CER
+            cer = eval_utils.cer(mapped_pred, mapped_target)
+            wer = eval_utils.wer(mapped_pred, mapped_target)
+            total_cer.append(cer)
+            total_wer.append(wer)
 
-        losses = sum(losses) / len(train_loader)
-        test_losses = sum(test_losses) / len(train_loader)
+        train_losses = sum(train_losses) / len(train_loader)
         eval_losses = sum(eval_losses) / len(test_loader)
+        total_cer = sum(total_cer) / len(total_cer)
+        total_wer = sum(total_wer) / len(total_wer)
         total_loss = 0
 
-        print('[Epoch %d ] loss %.2f, eval loss %2.f' %(step, test_losses, eval_losses))
+        print('[Epoch %d ] loss %.2f, eval loss %.2f, CER %.2f, WER %.2f' %(step, train_losses, eval_losses, total_cer, total_wer))
 
-        if step % 50 == 0:
-            temp_model_name = "logs/" + str(step) + "_an4_rnnt_model.pt"
-            torch.save(test_model, temp_model_name)
+        if step % 100 == 0:
+            temp_model_name = args.log_dir + str(step) + "_an4_rnnt_all_model.pt"
+            torch.save(model, temp_model_name)
+
+        # ==========================================
+        # Tensorboard Logging
+        # ==========================================
+
+        info = {'train_loss': train_losses,
+                'eval_loss': eval_losses,
+                'CER': total_cer,
+                'WER': total_cer
+                }
+
+        for tag, value in info.items():
+            logger.scalar_summary(tag, value, step+1)

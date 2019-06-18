@@ -24,7 +24,6 @@ python setup.py install
 
 Train Decoder (optional)
 ---
-
 ```python
 python train_decoder_LM.py --train-manifest ./data/LM/train_LM.txt
 ```
@@ -33,7 +32,7 @@ Train Network
 ---
 
 ```python
-python train.py 
+python train.py --val-manifest {your val manifest csv path} --train-manifest {your train manifest csv path
 ```
 
 Things To Do
