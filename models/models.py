@@ -122,6 +122,7 @@ class Transducer(nn.Module):
 
         self.fc1 = nn.Linear(2 * hidden_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, vocab_size)
+        self.dropout = nn.Dropout(0.2)
 
     def joint(self, f, g):
         dim = len(f.shape) - 1
@@ -129,7 +130,7 @@ class Transducer(nn.Module):
         out = torch.cat((f, g), dim=dim)
         out = F.tanh(self.fc1(out))
 
-        return self.fc2(out)
+        return self.dropout(self.fc2(out))
 
     def forward(self, xs, ys, xlen, ylen):
         # encoder

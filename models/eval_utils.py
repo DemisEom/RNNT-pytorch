@@ -1,6 +1,15 @@
 import Levenshtein as Lev
 
 
+def convert_to_strings(inverse_map, out):
+    results = []
+    for i in range(len(out)):
+        y = out[i]
+        mapped_pred = [inverse_map[j] for j in y]
+        results.append(mapped_pred)
+    return results
+
+
 def char_to_word(output_list):
     word_string = "".join(output_list)
     return word_string
@@ -29,6 +38,6 @@ def cer(s1, s2):
 
     word_s1, word_s2, = s1.replace(' ', ''), s2.replace(' ', '')
 
-    score = Lev.distance(word_s1, word_s2) / len(s2)
+    score = Lev.distance(word_s1, word_s2) / len(word_s2)
 
     return score

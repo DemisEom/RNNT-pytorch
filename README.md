@@ -24,20 +24,30 @@ python setup.py install
 
 Train Decoder (optional)
 ---
-```python
+```
 python train_decoder_LM.py --train-manifest ./data/LM/train_LM.txt
 ```
 
 Train Network
 ---
 
-```python
+```
 python train.py --val-manifest {your val manifest csv path} --train-manifest {your train manifest csv path
 ```
 
+Results
+---
+Data|Parameter Setting|WER|CER
+----|---|---|---
+an4|3encoder, 2decoder, 250 hidden size, 0.2 drop out|25.06|19.2
+an4|+augmentation + batch normalization|18.11|13.72
+an4|+specAugment|12.14|10.4
+
+![tensorboard](./result.png)
+
 Things To Do
 ---
-1. 특징 spectrogram, filter bank, word piece 종류 늘리기.
+1. 입력으로 사용하는 특징들을  spectrogram, filter bank, word piece 종류 늘리기.
 2. 네트워크 구조 다듬기.
 3. LM 선학습 후 사용 가능하게 하기.
     
