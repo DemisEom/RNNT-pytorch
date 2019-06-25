@@ -62,32 +62,25 @@ class EncoderModel(nn.Module):
         self.conv_1 = nn.Conv2d(1, 1, (1, 1), stride=1)
         self.conv_2 = nn.Conv2d(1, 1, (1, 1), stride=1)
 
+        self.batch_norm_1 = nn.BatchNorm2d(1)
+        self.batch_norm_2 = nn.BatchNorm2d(1)
+
     def forward(self, xs, hid=None):
         xs = torch.transpose(xs, 2, 3)
 
         xs = self.conv_1(xs)
+        xs = self.batch_norm_1(xs)
         xs = self.conv_2(xs)
 
         xs = xs.squeeze()
 
-        h, hid = self.lstm(xs, hid)
+        output, hid = self.lstm(xs, hid)
 
-        # TO DO, ADD pyramidal BI-LSTM
-        # num_hiddne_state = self.num_hidden_pBLSTM
-        #
-        # for i in range(self.num_layers_pBLSTM-1):
-        #     num_hiddne_state = int(num_hiddne_state / (i + 1))
-        #
-        #     pBlstm = nn.LSTM(input_size=x.size(2), hidden_size=num_hiddne_state, num_layers=1,
-        #                       batch_first=True, bidirectional=True).cuda()
-        #     output, _ = pBlstm(x)
-        #
-        #     output = pyramid_stack(output)
-        #     x = output
-        #
-        # output, _ = self.BLSTM2(x)
+        # output, _ = self.pBLSTM_1(output)
+        # output = pyramid_stack(output)
+        # output, _ = self.pBLSTM_2(output)
 
-        return self.linear(h), hid
+        return self.linear(output), hid
 
     def greedy_decode(self, xs):
         xs = self(xs)[0][0] # only one sequence
@@ -96,27 +89,51 @@ class EncoderModel(nn.Module):
         return pred.data.cpu().numpy(), -float(logp.sum())
 
 
+def pyramid_stack(inputs):
+
+    size = inputs.size()
+
+    if int(size[1]) % 2 == 1:
+        padded_inputs = F.pad(inputs, (0, 0, 0, 1, 0, 0))
+        sequence_length = int(size[1]) + 1
+    else:
+        padded_inputs = inputs
+        sequence_length = int(size[1])
+
+    odd_ind = torch.arange(1, sequence_length, 2, dtype=torch.long)
+    even_ind = torch.arange(0, sequence_length, 2, dtype=torch.long)
+
+    odd_inputs = padded_inputs[:, odd_ind, :]
+    even_inputs = padded_inputs[:, even_ind, :]
+
+    outputs_stacked = torch.cat([even_inputs, odd_inputs], 1)
+
+    return outputs_stacked
+
+
 class Transducer(nn.Module):
-    def __init__(self, input_size, vocab_size, hidden_size, num_layers, dropout=0.5, blank=0, bidirectional=False, decoder_load=False):
+    def __init__(self, input_size, vocab_size, hidden_size, decoder_num_layers, encoder_num_layers, dropout=0.5, blank=0, bidirectional=False, LM_model_path=False):
         super(Transducer, self).__init__()
         self.blank = blank
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
-        self.num_layers = num_layers
+        self.decoder_num_layers = decoder_num_layers
+        self.encoder_num_layers = encoder_num_layers
 
         self.loss = RNNTLoss()
 
         self.decoder = DecoderModel(embed_size=vocab_size,
                                     vocab_size=vocab_size,
+                                    num_layers=decoder_num_layers,
                                     hidden_size=hidden_size,
                                     dropout=dropout)
-        if decoder_load:
-            self.decoder.load_state_dict(torch.load('./models/decoder_LM_model'), strict=False)
+        if LM_model_path:
+            self.decoder.load_state_dict(torch.load(LM_model_path), strict=False)
 
         self.encoder = EncoderModel(input_size=input_size,
                                     vocab_size=hidden_size,
                                     hidden_size=hidden_size,
-                                    num_layers=num_layers,
+                                    num_layers=encoder_num_layers,
                                     dropout=dropout,
                                     bidirectional=bidirectional)
 
@@ -171,26 +188,32 @@ class Transducer(nn.Module):
         loss = self.loss(out, ys.int(), xlen, ylen)
         return loss
 
-    def greedy_decode(self, x):
-        x = self.encoder(x)[0][0]
-        vy = autograd.Variable(torch.LongTensor([0]), volatile=True).view(1, 1)  # vector preserve for embedding
-        if x.is_cuda:
-            vy = vy.cuda()
-        _, y, h = self.decoder(y_mat=vy)
-        y_seq = [];
-        logp = 0
+    def greedy_decode_batch(self, x):
+        output, _ = self.encoder(x)
 
-        for i in x:
-            ytu = self.joint(i, y[0][0])
-            out = F.log_softmax(ytu, dim=0)
-            p, pred = torch.max(out, dim=0)
-            pred = int(pred);
-            logp += float(p)
-            if pred != self.blank:
-                y_seq.append(pred)
-                vy.data[0][0] = pred
-                _, y, h = self.decoder(y_mat=vy, hid=h)
-        return y_seq, -logp
+        decoded = []
+        for ind in range(output.size(0)):
+            x = output[ind]
+            vy = autograd.Variable(torch.LongTensor([0]), volatile=True).view(1, 1)  # vector preserve for embedding
+            if x.is_cuda:
+                vy = vy.cuda()
+            _, y, h = self.decoder(y_mat=vy)
+            y_seq = [];
+            logp = 0
+
+            for i in x:
+                ytu = self.joint(i, y[0][0])
+                out = F.log_softmax(ytu, dim=0)
+                p, pred = torch.max(out, dim=0)
+                pred = int(pred);
+                logp += float(p)
+                if pred != self.blank:
+                    y_seq.append(pred)
+                    vy.data[0][0] = pred
+                    _, y, h = self.decoder(y_mat=vy, hid=h)
+
+            decoded.append(y_seq)
+        return decoded
 
     def beam_search(self, xs, labels_map, W=10, prefix=False):
         '''''
@@ -276,28 +299,6 @@ class Transducer(nn.Module):
         # return highest probability sequence
         print(B[0])
         return B[0].k, -B[0].logp
-
-
-def pyramid_stack(inputs):
-
-    size = inputs.size()
-
-    if int(size[1]) % 2 == 1:
-        padded_inputs = F.pad(inputs, (0, 0, 0, 1, 0, 0))
-        sequence_length = int(size[1]) + 1
-    else:
-        padded_inputs = inputs
-        sequence_length = int(size[1])
-
-    odd_ind = torch.arange(1, sequence_length, 2, dtype=torch.long)
-    even_ind = torch.arange(0, sequence_length, 2, dtype=torch.long)
-
-    odd_inputs = padded_inputs[:, odd_ind, :]
-    even_inputs = padded_inputs[:, even_ind, :]
-
-    outputs_stacked = torch.cat([even_inputs, odd_inputs], 2)
-
-    return outputs_stacked
 
 
 def log_aplusb(a, b):
